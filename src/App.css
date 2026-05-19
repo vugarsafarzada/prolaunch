@@ -242,6 +242,62 @@ body {
   font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
 }
 
+.recent-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.recent-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.recent-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+}
+
+.recent-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.recent-item svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.recent-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+  font-size: 12px;
+}
+
 /* Workspace */
 .workspace {
   display: flex;
@@ -346,6 +402,43 @@ body {
 .script-card.running {
   border-color: var(--success);
   background: rgba(81, 207, 102, 0.08);
+}
+
+.script-card.pinned {
+  background: rgba(76, 154, 255, 0.06);
+  border-color: rgba(76, 154, 255, 0.2);
+}
+
+.script-card.pinned:hover {
+  background: rgba(76, 154, 255, 0.1);
+}
+
+.btn-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  margin-right: 4px;
+  transition: color var(--transition);
+}
+
+.btn-pin:hover {
+  color: var(--accent);
+}
+
+.btn-pin svg {
+  transition: transform var(--transition);
+}
+
+.btn-pin:hover svg {
+  transform: scale(1.15);
 }
 
 .script-info {

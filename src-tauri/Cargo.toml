@@ -1,7 +1,7 @@
 [package]
 name = "project-1"
 version = "0.1.0"
-description = "DevLauncher - Desktop app for managing dev scripts"
+description = "prolaunch - Desktop app for managing dev scripts"
 authors = ["you"]
 edition = "2021"
 

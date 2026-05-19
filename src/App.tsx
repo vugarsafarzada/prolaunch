@@ -23,6 +23,7 @@ function App() {
       setActiveTabId(newTab.id);
     }
     setAddingTab(false);
+    invoke("save_recent_project", { projectPath: project.path }).catch(() => {});
   };
 
   const handleAddTab = () => {

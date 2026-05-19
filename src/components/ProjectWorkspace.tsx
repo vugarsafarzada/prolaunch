@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import ScriptButton from "./ScriptButton";
@@ -15,6 +15,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [activeLog, setActiveLog] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [pinnedScripts, setPinnedScripts] = useState<Set<string>>(new Set());
 
   const addLog = useCallback(
     (scriptName: string, text: string, isError: boolean) => {
@@ -25,6 +26,27 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
     },
     [],
   );
+
+  const pinsLoaded = useRef(false);
+
+  useEffect(() => {
+    pinsLoaded.current = false;
+    invoke<string[]>("load_pins", { projectPath: project.path }).then(
+      (pins) => {
+        setPinnedScripts(new Set(pins));
+        pinsLoaded.current = true;
+      },
+      () => {},
+    );
+  }, [project.path]);
+
+  useEffect(() => {
+    if (!pinsLoaded.current) return;
+    invoke("save_pins", {
+      projectPath: project.path,
+      pins: Array.from(pinnedScripts),
+    }).catch(() => {});
+  }, [project.path, pinnedScripts]);
 
   useEffect(() => {
     onRunningChange(project.path, runningScripts.size > 0);
@@ -88,6 +110,18 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
     }
   };
 
+  const handleTogglePin = (script: ScriptInfo) => {
+    setPinnedScripts((prev) => {
+      const next = new Set(prev);
+      if (next.has(script.name)) {
+        next.delete(script.name);
+      } else {
+        next.add(script.name);
+      }
+      return next;
+    });
+  };
+
   const handleStop = async (script: ScriptInfo) => {
     try {
       await invoke("kill_script", {
@@ -140,17 +174,23 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
                   s.command.toLowerCase().includes(searchQuery.toLowerCase()),
               )
               .sort((a, b) => {
+                const aPinned = pinnedScripts.has(a.name) ? 0 : 1;
+                const bPinned = pinnedScripts.has(b.name) ? 0 : 1;
+                if (aPinned !== bPinned) return aPinned - bPinned;
                 const aRunning = runningScripts.has(a.name) ? 0 : 1;
                 const bRunning = runningScripts.has(b.name) ? 0 : 1;
-                return aRunning - bRunning;
+                if (aRunning !== bRunning) return aRunning - bRunning;
+                return a.name.localeCompare(b.name);
               })
               .map((script) => (
               <ScriptButton
                 key={script.name}
                 script={script}
                 isRunning={runningScripts.has(script.name)}
+                isPinned={pinnedScripts.has(script.name)}
                 onStart={handleStart}
                 onStop={handleStop}
+                onTogglePin={handleTogglePin}
               />
             ))
           )}

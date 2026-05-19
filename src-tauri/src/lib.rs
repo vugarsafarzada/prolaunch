@@ -274,6 +274,83 @@ fn detect_package_managers(project_path: String) -> Result<Vec<String>, String> 
     Ok(managers)
 }
 
+fn pins_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let mut dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    dir.push("pins.json");
+    Ok(dir)
+}
+
+fn read_all_pins(app: &AppHandle) -> HashMap<String, Vec<String>> {
+    let path = match pins_path(app) {
+        Ok(p) => p,
+        Err(_) => return HashMap::new(),
+    };
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return HashMap::new(),
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn write_all_pins(app: &AppHandle, pins: &HashMap<String, Vec<String>>) -> Result<(), String> {
+    let path = pins_path(app)?;
+    let content = serde_json::to_string_pretty(pins).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_pins(app: AppHandle, project_path: String) -> Vec<String> {
+    let all = read_all_pins(&app);
+    all.get(&project_path).cloned().unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_pins(app: AppHandle, project_path: String, pins: Vec<String>) -> Result<(), String> {
+    let mut all = read_all_pins(&app);
+    all.insert(project_path, pins);
+    write_all_pins(&app, &all)
+}
+
+fn recent_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let mut dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    dir.push("recent.json");
+    Ok(dir)
+}
+
+#[tauri::command]
+fn load_recent_projects(app: AppHandle) -> Vec<String> {
+    let path = match recent_path(&app) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+#[tauri::command]
+fn save_recent_project(app: AppHandle, project_path: String) -> Result<(), String> {
+    let path = recent_path(&app)?;
+    let mut list: Vec<String> = if path.exists() {
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    list.retain(|p| p != &project_path);
+    list.insert(0, project_path);
+    if list.len() > 10 {
+        list.truncate(10);
+    }
+
+    let content = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn list_projects(recent_path: Option<String>) -> Result<Vec<ProjectInfo>, String> {
     let mut projects = Vec::new();
@@ -303,6 +380,10 @@ pub fn run() {
             get_running_scripts,
             list_projects,
             detect_package_managers,
+            load_pins,
+            save_pins,
+            load_recent_projects,
+            save_recent_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
