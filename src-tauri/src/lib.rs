@@ -365,9 +365,23 @@ fn list_projects(recent_path: Option<String>) -> Result<Vec<ProjectInfo>, String
     Ok(projects)
 }
 
+fn kill_all_processes(app: &AppHandle) {
+    let children: Vec<Child> = {
+        let state = app.state::<AppState>();
+        let result = match state.running_processes.lock() {
+            Ok(mut procs) => procs.drain().map(|(_, c)| c).collect(),
+            Err(_) => return,
+        };
+        result
+    };
+    for mut child in children {
+        kill_process_group(&mut child).ok();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
@@ -385,6 +399,12 @@ pub fn run() {
             load_recent_projects,
             save_recent_project,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            kill_all_processes(app_handle);
+        }
+    });
 }
