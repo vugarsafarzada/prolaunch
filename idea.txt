@@ -11,6 +11,6 @@ Zamanla tək JS/TS deyildiginən başqa dillərdə də dəstəkləyəcək bunu n
 [x] kommandları ən üstə pinləmək
 [x] run olan kommandı restart (stop and run again) etmək üçün refresh iconu ilə button
 [x] recently opened projects folders
-[] hər hansı bir project açıldıqdan sonra sol üstdə proyektin adının yanında folder iconu olacaq (open project destination) vuranda finder (windowsda explorer) açılsın.
+[x] hər hansı bir project açıldıqdan sonra sol üstdə proyektin adının yanında folder iconu olacaq (open project destination) vuranda finder (windowsda explorer) açılsın.
+[] shortcuts əlavə et new tab üçün (ctrl+t/cmd+t), bağlanan tabı geri açmaq üçün (ctrl+shift+t/cmd+shift+t).
 [] split tab edə bilmək (horizontal və vertical split)
-[] shortcuts əlavə et new tab üçün, new project üçün və sairə.

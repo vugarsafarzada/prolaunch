@@ -352,6 +352,58 @@ fn save_recent_project(app: AppHandle, project_path: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn open_in_vscode(path: String) -> Result<(), String> {
+    Command::new("code")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Failed to open VS Code: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_in_terminal(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-a", "Terminal", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "cmd", "/K", &format!("cd /d \"{}\"", path)])
+            .spawn()
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let terminal = if Command::new("which")
+            .arg("gnome-terminal")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            "gnome-terminal"
+        } else if Command::new("which")
+            .arg("xterm")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            "xterm"
+        } else {
+            return Err("No supported terminal found".to_string());
+        };
+        Command::new(terminal)
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn list_projects(recent_path: Option<String>) -> Result<Vec<ProjectInfo>, String> {
     let mut projects = Vec::new();
 
@@ -398,6 +450,8 @@ pub fn run() {
             save_pins,
             load_recent_projects,
             save_recent_project,
+            open_in_vscode,
+            open_in_terminal,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

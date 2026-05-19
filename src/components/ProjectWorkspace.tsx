@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import ScriptButton from "./ScriptButton";
 import LogViewer from "./LogViewer";
 import type { ProjectInfo, ScriptInfo, LogEvent, ProcessEndEvent, LogLine } from "../types";
@@ -16,6 +17,28 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
   const [activeLog, setActiveLog] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [pinnedScripts, setPinnedScripts] = useState<Set<string>>(new Set());
+  const [showFolderMenu, setShowFolderMenu] = useState(false);
+  const folderRef = useRef<HTMLDivElement>(null);
+
+  const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+  const isWindows = navigator.platform.toUpperCase().indexOf("WIN") >= 0;
+  const folderLabel = isMac ? "Finder" : isWindows ? "Explorer" : "File Manager";
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (folderRef.current && !folderRef.current.contains(e.target as Node)) {
+        setShowFolderMenu(false);
+      }
+    };
+    if (showFolderMenu) {
+      document.addEventListener("mousedown", handleClick);
+    }
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showFolderMenu]);
+
+  const handleOpenFolder = () => revealItemInDir(project.path);
+  const handleOpenVSCode = () => invoke("open_in_vscode", { path: project.path });
+  const handleOpenTerminal = () => invoke("open_in_terminal", { path: project.path });
 
   const addLog = useCallback(
     (scriptName: string, text: string, isError: boolean) => {
@@ -165,7 +188,27 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
     <div className="workspace">
       <div className="workspace-sidebar">
         <div className="workspace-header">
-          <h2>{project.name}</h2>
+          <div className="workspace-title-row">
+            <h2>{project.name}</h2>
+            <div className="folder-actions" ref={folderRef}>
+              <button
+                className="btn-folder"
+                onClick={() => setShowFolderMenu((p) => !p)}
+                title="Open project location"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
+              {showFolderMenu && (
+                <div className="folder-dropdown">
+                  <button onClick={handleOpenFolder}>{folderLabel}</button>
+                  <button onClick={handleOpenVSCode}>VS Code</button>
+                  <button onClick={handleOpenTerminal}>Terminal</button>
+                </div>
+              )}
+            </div>
+          </div>
           <span className="workspace-path">{project.path}</span>
         </div>
         <div className="search-box">
