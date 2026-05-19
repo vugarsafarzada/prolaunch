@@ -122,6 +122,24 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
     });
   };
 
+  const handleRestart = async (script: ScriptInfo) => {
+    try {
+      await invoke("kill_script", {
+        projectPath: project.path,
+        scriptName: script.name,
+      });
+      addLog(script.name, `Restarting '${script.name}'...`, false);
+      const pid = await invoke<number>("run_script", {
+        projectPath: project.path,
+        scriptName: script.name,
+      });
+      setActiveLog(script.name);
+      addLog(script.name, `Restarted (PID: ${pid})`, false);
+    } catch (err) {
+      addLog(script.name, `Error restarting: ${err}`, true);
+    }
+  };
+
   const handleStop = async (script: ScriptInfo) => {
     try {
       await invoke("kill_script", {
@@ -217,7 +235,15 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
             </button>
           </div>
         )}
-        <LogViewer logs={runningLogs} onClear={() => setLogs([])} />
+        <LogViewer
+          logs={runningLogs}
+          activeScript={activeLog}
+          onClear={() => setLogs([])}
+          onReRun={() => {
+            const sc = activeLog ? project.scripts.find((s) => s.name === activeLog) : null;
+            if (sc) handleRestart(sc);
+          }}
+        />
       </div>
     </div>
   );

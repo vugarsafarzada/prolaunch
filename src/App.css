@@ -510,6 +510,7 @@ body {
 
 .log-tabs {
   display: flex;
+  align-items: center;
   gap: 2px;
   padding: 4px 8px 0;
   background: var(--bg-secondary);
@@ -591,6 +592,30 @@ body {
 .btn-clear:hover {
   color: var(--text-primary);
   background: var(--bg-tertiary);
+}
+
+.log-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.btn-rerun {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--warning);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn-rerun:hover {
+  background: rgba(252, 196, 25, 0.1);
 }
 
 .log-content {
