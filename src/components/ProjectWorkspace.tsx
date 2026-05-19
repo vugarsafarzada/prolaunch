@@ -116,11 +116,29 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
           <h2>{project.name}</h2>
           <span className="workspace-path">{project.path}</span>
         </div>
+        <div className="search-box">
+          <svg className="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Search scripts..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
         <div className="scripts-list">
           {project.scripts.length === 0 ? (
             <div className="no-scripts">No scripts found in package.json</div>
           ) : (
             [...project.scripts]
+              .filter(
+                (s) =>
+                  s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  s.command.toLowerCase().includes(searchQuery.toLowerCase()),
+              )
               .sort((a, b) => {
                 const aRunning = runningScripts.has(a.name) ? 0 : 1;
                 const bRunning = runningScripts.has(b.name) ? 0 : 1;

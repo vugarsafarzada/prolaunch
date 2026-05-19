@@ -7,7 +7,7 @@ Zamanla tək JS/TS deyildiginən başqa dillərdə də dəstəkləyəcək bunu n
 
 Əlavə xüssusiyyətlər:
 [x] run olan kommandlar siyahıda ən başa qalxmalıdı ki çox kommand olanda axtarmaq çətin olur.
-[] kommandları search edə bilmək
+[x] kommandları search edə bilmək
 [] kommandları ən üstə pinləmək
 [] run olan kommandı restart etmək üçün refresh iconu ilə button
 [] recently opened projects folders

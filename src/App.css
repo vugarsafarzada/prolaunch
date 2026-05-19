@@ -276,6 +276,41 @@ body {
   word-break: break-all;
 }
 
+.search-box {
+  position: relative;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-icon {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  padding: 6px 8px 6px 28px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
 .scripts-list {
   flex: 1;
   overflow-y: auto;
