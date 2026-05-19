@@ -14,6 +14,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
   const [runningScripts, setRunningScripts] = useState<Set<string>>(new Set());
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [activeLog, setActiveLog] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const addLog = useCallback(
     (scriptName: string, text: string, isError: boolean) => {
@@ -119,7 +120,13 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
           {project.scripts.length === 0 ? (
             <div className="no-scripts">No scripts found in package.json</div>
           ) : (
-            project.scripts.map((script) => (
+            [...project.scripts]
+              .sort((a, b) => {
+                const aRunning = runningScripts.has(a.name) ? 0 : 1;
+                const bRunning = runningScripts.has(b.name) ? 0 : 1;
+                return aRunning - bRunning;
+              })
+              .map((script) => (
               <ScriptButton
                 key={script.name}
                 script={script}
