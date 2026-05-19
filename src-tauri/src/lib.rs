@@ -42,6 +42,13 @@ struct ProcessEndEvent {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct CreateProjectLogEvent {
+    creation_id: String,
+    line: String,
+    is_error: bool,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct ProjectInfo {
     name: String,
     path: String,
@@ -437,6 +444,25 @@ fn cra_steps(use_typescript: bool, project_name: &str, parent_dir: &Path) -> Vec
     }]
 }
 
+fn nuxt_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
+    vec![creation_step(
+        "Create Nuxt project",
+        npx_bin(),
+        vec![
+            "-y",
+            "nuxi@latest",
+            "init",
+            project_name,
+            "--template",
+            "minimal",
+            "--packageManager",
+            "npm",
+            "--gitInit=false",
+        ],
+        parent_dir,
+    )]
+}
+
 fn angular_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
     vec![creation_step(
         "Create Angular project",
@@ -472,6 +498,8 @@ fn creation_steps(
         "vite-react-js" => vite_steps("react", project_name, parent_dir, target_dir),
         "vite-vue-ts" => vite_steps("vue-ts", project_name, parent_dir, target_dir),
         "vite-vue-js" => vite_steps("vue", project_name, parent_dir, target_dir),
+        "nuxt-ts-latest" => nuxt_steps(project_name, parent_dir),
+        "nuxt-js-latest" => nuxt_steps(project_name, parent_dir),
         "vite-svelte-ts" => vite_steps("svelte-ts", project_name, parent_dir, target_dir),
         "vite-svelte-js" => vite_steps("svelte", project_name, parent_dir, target_dir),
         "next-ts-latest" => next_steps("latest", true, project_name, parent_dir),
@@ -524,6 +552,93 @@ fn creation_command(step: &CreationStep) -> Command {
     }
 }
 
+fn sanitize_log_line(line: &str) -> String {
+    let mut output = String::new();
+    let mut chars = line.chars();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            for next in chars.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        if ch != '\u{8}' {
+            output.push(ch);
+        }
+    }
+
+    output.trim().to_string()
+}
+
+fn next_line_break(text: &str) -> Option<usize> {
+    match (text.find('\n'), text.find('\r')) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn emit_create_log(app: &AppHandle, creation_id: &str, line: String, is_error: bool) {
+    let line = sanitize_log_line(&line);
+    if line.is_empty() {
+        return;
+    }
+
+    let _ = app.emit(
+        "project-create-log",
+        CreateProjectLogEvent {
+            creation_id: creation_id.to_string(),
+            line,
+            is_error,
+        },
+    );
+}
+
+fn spawn_create_output_reader<R>(
+    app: AppHandle,
+    creation_id: String,
+    mut stream: R,
+    is_error: bool,
+) -> std::thread::JoinHandle<String>
+where
+    R: Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let mut output = String::new();
+        let mut pending = String::new();
+        let mut buffer = [0; 4096];
+
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buffer[..n]);
+                    output.push_str(&chunk);
+                    pending.push_str(&chunk);
+
+                    while let Some(index) = next_line_break(&pending) {
+                        let line = pending[..index].to_string();
+                        pending = pending[index + 1..].to_string();
+                        emit_create_log(&app, &creation_id, line, is_error);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        if !pending.is_empty() {
+            emit_create_log(&app, &creation_id, pending, is_error);
+        }
+
+        output
+    })
+}
+
 fn join_reader(handle: Option<std::thread::JoinHandle<String>>) -> String {
     handle
         .and_then(|thread| thread.join().ok())
@@ -558,7 +673,20 @@ fn command_output_excerpt(stdout: &str, stderr: &str) -> String {
     }
 }
 
-fn run_creation_step(state: &AppState, step: &CreationStep) -> Result<(), String> {
+fn run_creation_step(
+    app: &AppHandle,
+    state: &AppState,
+    creation_id: &str,
+    step: &CreationStep,
+) -> Result<(), String> {
+    emit_create_log(app, creation_id, format!("{}...", step.label), false);
+    emit_create_log(
+        app,
+        creation_id,
+        format!("$ {} {}", step.program, step.args.join(" ")),
+        false,
+    );
+
     let mut command = creation_command(step);
     command
         .current_dir(&step.cwd)
@@ -575,26 +703,18 @@ fn run_creation_step(state: &AppState, step: &CreationStep) -> Result<(), String
     let mut child = command
         .spawn()
         .map_err(|e| format!("{} failed to start: {}", step.label, e))?;
-    let creation_id = state.next_run_id.fetch_add(1, Ordering::Relaxed);
+    let creation_process_id = state.next_run_id.fetch_add(1, Ordering::Relaxed);
     let creation_pid = child.id();
     {
         let mut processes = state.creation_processes.lock().map_err(|e| e.to_string())?;
-        processes.insert(creation_id, creation_pid);
+        processes.insert(creation_process_id, creation_pid);
     }
 
-    let stdout = child.stdout.take().map(|mut stream| {
-        std::thread::spawn(move || {
-            let mut output = String::new();
-            let _ = stream.read_to_string(&mut output);
-            output
-        })
+    let stdout = child.stdout.take().map(|stream| {
+        spawn_create_output_reader(app.clone(), creation_id.to_string(), stream, false)
     });
-    let stderr = child.stderr.take().map(|mut stream| {
-        std::thread::spawn(move || {
-            let mut output = String::new();
-            let _ = stream.read_to_string(&mut output);
-            output
-        })
+    let stderr = child.stderr.take().map(|stream| {
+        spawn_create_output_reader(app.clone(), creation_id.to_string(), stream, true)
     });
 
     let started_at = Instant::now();
@@ -605,7 +725,7 @@ fn run_creation_step(state: &AppState, step: &CreationStep) -> Result<(), String
                 if started_at.elapsed() > Duration::from_secs(600) {
                     let _ = kill_process_group(&mut child);
                     if let Ok(mut processes) = state.creation_processes.lock() {
-                        processes.remove(&creation_id);
+                        processes.remove(&creation_process_id);
                     }
                     let stdout = join_reader(stdout);
                     let stderr = join_reader(stderr);
@@ -620,7 +740,7 @@ fn run_creation_step(state: &AppState, step: &CreationStep) -> Result<(), String
             Err(e) => {
                 let _ = kill_process_group(&mut child);
                 if let Ok(mut processes) = state.creation_processes.lock() {
-                    processes.remove(&creation_id);
+                    processes.remove(&creation_process_id);
                 }
                 return Err(format!("{} failed while waiting: {}", step.label, e));
             }
@@ -628,13 +748,14 @@ fn run_creation_step(state: &AppState, step: &CreationStep) -> Result<(), String
     };
 
     if let Ok(mut processes) = state.creation_processes.lock() {
-        processes.remove(&creation_id);
+        processes.remove(&creation_process_id);
     }
 
     let stdout = join_reader(stdout);
     let stderr = join_reader(stderr);
 
     if status.success() {
+        emit_create_log(app, creation_id, format!("{} completed", step.label), false);
         return Ok(());
     }
 
@@ -650,30 +771,43 @@ fn run_creation_step(state: &AppState, step: &CreationStep) -> Result<(), String
 }
 
 #[tauri::command]
-fn create_project(
-    state: State<'_, AppState>,
+async fn create_project(
+    app: AppHandle,
     template_id: String,
     parent_dir: String,
     project_name: String,
+    creation_id: String,
 ) -> Result<ProjectInfo, String> {
-    validate_project_name(&project_name)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        validate_project_name(&project_name)?;
 
-    let parent_path = PathBuf::from(&parent_dir);
-    if !parent_path.is_dir() {
-        return Err("Parent folder does not exist".to_string());
-    }
+        let parent_path = PathBuf::from(&parent_dir);
+        if !parent_path.is_dir() {
+            return Err("Parent folder does not exist".to_string());
+        }
 
-    let target_path = parent_path.join(&project_name);
-    if target_path.exists() {
-        return Err("Target folder already exists".to_string());
-    }
+        let target_path = parent_path.join(&project_name);
+        if target_path.exists() {
+            return Err("Target folder already exists".to_string());
+        }
 
-    let steps = creation_steps(&template_id, &project_name, &parent_path, &target_path)?;
-    for step in &steps {
-        run_creation_step(&state, step)?;
-    }
+        let steps = creation_steps(&template_id, &project_name, &parent_path, &target_path)?;
+        let state = app.state::<AppState>();
+        for step in &steps {
+            run_creation_step(&app, &state, &creation_id, step)?;
+        }
 
-    read_package_json(target_path.to_string_lossy().to_string())
+        emit_create_log(
+            &app,
+            &creation_id,
+            "Project created successfully. Opening workspace...".to_string(),
+            false,
+        );
+
+        read_package_json(target_path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Create task failed: {}", e))?
 }
 
 #[tauri::command]

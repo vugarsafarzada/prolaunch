@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectInfo } from "../types";
 
 type LanguageFilter = "All" | "JavaScript" | "TypeScript";
-type CreateStep = "gallery" | "details";
+type CreateStep = "gallery" | "details" | "creating";
 
 interface TemplateVersion {
   id: string;
@@ -25,6 +26,17 @@ interface ProjectTemplate {
 interface Props {
   onBack: () => void;
   onProjectOpen: (project: ProjectInfo) => void;
+}
+
+interface CreateProjectLogEvent {
+  creation_id: string;
+  line: string;
+  is_error: boolean;
+}
+
+interface CreateLogLine {
+  text: string;
+  isError: boolean;
 }
 
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
@@ -149,6 +161,36 @@ const PROJECT_TEMPLATES: ProjectTemplate[] = [
     ],
   },
   {
+    cardId: "nuxt-ts",
+    title: "Nuxt",
+    framework: "Nuxt",
+    language: "TypeScript",
+    description: "Vue full-stack app generated with Nuxt.",
+    tags: ["Vue", "Nuxt", "SSR"],
+    versions: [
+      {
+        id: "nuxt-ts-latest",
+        label: "Latest",
+        command: "npx nuxi@latest init my-app --template minimal --packageManager npm --gitInit=false",
+      },
+    ],
+  },
+  {
+    cardId: "nuxt-js",
+    title: "Nuxt",
+    framework: "Nuxt",
+    language: "JavaScript",
+    description: "Vue full-stack app generated with Nuxt.",
+    tags: ["Vue", "Nuxt", "SSR"],
+    versions: [
+      {
+        id: "nuxt-js-latest",
+        label: "Latest",
+        command: "npx nuxi@latest init my-app --template minimal --packageManager npm --gitInit=false",
+      },
+    ],
+  },
+  {
     cardId: "vite-svelte-ts",
     title: "Svelte + Vite",
     framework: "Svelte",
@@ -215,6 +257,14 @@ function projectNameError(projectName: string): string | null {
   return null;
 }
 
+function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
   const [step, setStep] = useState<CreateStep>("gallery");
   const [language, setLanguage] = useState<LanguageFilter>("All");
@@ -224,6 +274,9 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
   const [projectName, setProjectName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [createLogs, setCreateLogs] = useState<CreateLogLine[]>([]);
+  const activeCreationIdRef = useRef<string | null>(null);
+  const createLogBottomRef = useRef<HTMLDivElement>(null);
 
   const filteredTemplates = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -257,6 +310,35 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
   const canCreate = Boolean(parentDir && selectedVersion && !nameError && !isCreating);
   const previewPath = targetPath(parentDir, projectName);
 
+  useEffect(() => {
+    let isMounted = true;
+    let unlisten: UnlistenFn | undefined;
+
+    listen<CreateProjectLogEvent>("project-create-log", (event) => {
+      if (event.payload.creation_id !== activeCreationIdRef.current) return;
+
+      setCreateLogs((prev) => [
+        ...prev,
+        { text: event.payload.line, isError: event.payload.is_error },
+      ].slice(-1000));
+    }).then((fn) => {
+      if (isMounted) {
+        unlisten = fn;
+      } else {
+        fn();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    createLogBottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [createLogs]);
+
   const handleTemplateSelect = (template: ProjectTemplate) => {
     setSelectedTemplateId((current) => {
       const stillOnTemplate = template.versions.some((version) => version.id === current);
@@ -285,18 +367,33 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
   const handleCreate = async () => {
     if (!canCreate) return;
 
+    const creationId = crypto.randomUUID();
+    activeCreationIdRef.current = creationId;
+    setStep("creating");
     setIsCreating(true);
     setErrorMessage(null);
+    setCreateLogs([
+      { text: `Preparing ${selectedTemplate.title} project...`, isError: false },
+      { text: `Target: ${previewPath}`, isError: false },
+    ]);
 
     try {
+      await waitForNextPaint();
       const project = await invoke<ProjectInfo>("create_project", {
         templateId: selectedVersion.id,
         parentDir,
         projectName,
+        creationId,
       });
+      activeCreationIdRef.current = null;
       onProjectOpen(project);
     } catch (err) {
+      activeCreationIdRef.current = null;
       setErrorMessage(String(err));
+      setCreateLogs((prev) => [
+        ...prev,
+        { text: `Error: ${String(err)}`, isError: true },
+      ].slice(-1000));
     } finally {
       setIsCreating(false);
     }
@@ -307,7 +404,8 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
       <div className="create-topbar">
         <button
           className="create-back"
-          onClick={step === "gallery" ? onBack : () => setStep("gallery")}
+          onClick={step === "gallery" ? onBack : step === "creating" ? () => setStep("details") : () => setStep("gallery")}
+          disabled={isCreating}
           type="button"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -317,7 +415,13 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         </button>
         <div>
           <h2>Create Project</h2>
-          <span>{step === "gallery" ? "Choose a starter" : "Configure project"}</span>
+          <span>
+            {step === "gallery"
+              ? "Choose a starter"
+              : step === "details"
+                ? "Configure project"
+                : "Installing project"}
+          </span>
         </div>
       </div>
 
@@ -419,7 +523,7 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
             </button>
           </div>
         </>
-      ) : (
+      ) : step === "details" ? (
         <div className="create-details">
           <div className="selected-template-summary">
             <span className="summary-label">Selected</span>
@@ -473,6 +577,73 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
               type="button"
             >
               {isCreating ? "Creating..." : "Create"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="create-progress">
+          <div className="create-progress-hero">
+            <div className="create-spinner" />
+            <div>
+              <strong>{isCreating ? `Creating ${projectName}` : "Create failed"}</strong>
+              <span>
+                {isCreating
+                  ? "Installing dependencies and preparing the workspace..."
+                  : "Review the logs below, adjust settings, and try again."}
+              </span>
+            </div>
+          </div>
+
+          <div className="selected-template-summary">
+            <span className="summary-label">Selected</span>
+            <strong>{selectedTemplate.title}</strong>
+            <span>{selectedTemplate.language} / {selectedVersion.label}</span>
+            <code>{selectedVersion.command}</code>
+          </div>
+
+          <div className="target-preview">
+            <span>Target</span>
+            <code>{previewPath}</code>
+          </div>
+
+          <div className="create-log-panel">
+            <div className="create-log-header">
+              <span>Install logs</span>
+              <span>{isCreating ? "Live output" : "Stopped"}</span>
+            </div>
+            <div className="create-log-content">
+              {createLogs.map((log, index) => (
+                <div key={`${index}-${log.text}`} className={`create-log-line ${log.isError ? "error" : ""}`}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <code>{log.text}</code>
+                </div>
+              ))}
+              <div ref={createLogBottomRef} />
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div className="welcome-error" role="alert">
+              {errorMessage}
+            </div>
+          )}
+
+          <div className="create-footer">
+            <button
+              className="create-secondary"
+              disabled={isCreating}
+              onClick={() => setStep("details")}
+              type="button"
+            >
+              Back to settings
+            </button>
+            <button
+              className="create-primary"
+              disabled={isCreating}
+              onClick={handleCreate}
+              type="button"
+            >
+              {isCreating ? "Creating..." : "Try again"}
             </button>
           </div>
         </div>
