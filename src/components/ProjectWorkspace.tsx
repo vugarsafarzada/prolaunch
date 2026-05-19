@@ -19,6 +19,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
   const [pinnedScripts, setPinnedScripts] = useState<Set<string>>(new Set());
   const [showFolderMenu, setShowFolderMenu] = useState(false);
   const folderRef = useRef<HTMLDivElement>(null);
+  const startingScriptsRef = useRef<Set<string>>(new Set());
 
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
   const isWindows = navigator.platform.toUpperCase().indexOf("WIN") >= 0;
@@ -49,6 +50,22 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
     },
     [],
   );
+
+  const setScriptRunning = useCallback((scriptName: string, isRunning: boolean) => {
+    setRunningScripts((prev) => {
+      if (isRunning === prev.has(scriptName)) {
+        return prev;
+      }
+
+      const next = new Set(prev);
+      if (isRunning) {
+        next.add(scriptName);
+      } else {
+        next.delete(scriptName);
+      }
+      return next;
+    });
+  }, []);
 
   const pinsLoaded = useRef(false);
 
@@ -92,11 +109,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
         (event) => {
           const { project_path, script_name, exit_code } = event.payload;
           if (project_path === project.path) {
-            setRunningScripts((prev) => {
-              const next = new Set(prev);
-              next.delete(script_name);
-              return next;
-            });
+            setScriptRunning(script_name, false);
             addLog(
               script_name,
               `Process exited with code ${exit_code ?? "unknown"}`,
@@ -113,23 +126,30 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
       unlistenLog?.();
       unlistenEnd?.();
     };
-  }, [project.path, addLog]);
+  }, [project.path, addLog, setScriptRunning]);
 
   const handleStart = async (script: ScriptInfo) => {
+    if (runningScripts.has(script.name) || startingScriptsRef.current.has(script.name)) {
+      return;
+    }
+
+    startingScriptsRef.current.add(script.name);
+    setScriptRunning(script.name, true);
+    setActiveLog(script.name);
+    addLog(script.name, `Starting '${script.name}'...`, false);
+
     try {
       const pid = await invoke<number>("run_script", {
         projectPath: project.path,
         scriptName: script.name,
+        packageManager: project.packageManager,
       });
-      setRunningScripts((prev) => new Set(prev).add(script.name));
-      setActiveLog(script.name);
-      addLog(
-        script.name,
-        `Starting '${script.name}' (PID: ${pid})...`,
-        false,
-      );
+      addLog(script.name, `Started with ${project.packageManager} (PID: ${pid})`, false);
     } catch (err) {
+      setScriptRunning(script.name, false);
       addLog(script.name, `Error: ${err}`, true);
+    } finally {
+      startingScriptsRef.current.delete(script.name);
     }
   };
 
@@ -146,19 +166,28 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
   };
 
   const handleRestart = async (script: ScriptInfo) => {
+    let stopped = false;
+
     try {
       await invoke("kill_script", {
         projectPath: project.path,
         scriptName: script.name,
       });
+      stopped = true;
+      setScriptRunning(script.name, false);
       addLog(script.name, `Restarting '${script.name}'...`, false);
+      setScriptRunning(script.name, true);
       const pid = await invoke<number>("run_script", {
         projectPath: project.path,
         scriptName: script.name,
+        packageManager: project.packageManager,
       });
       setActiveLog(script.name);
-      addLog(script.name, `Restarted (PID: ${pid})`, false);
+      addLog(script.name, `Restarted with ${project.packageManager} (PID: ${pid})`, false);
     } catch (err) {
+      if (stopped) {
+        setScriptRunning(script.name, false);
+      }
       addLog(script.name, `Error restarting: ${err}`, true);
     }
   };
@@ -169,11 +198,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
         projectPath: project.path,
         scriptName: script.name,
       });
-      setRunningScripts((prev) => {
-        const next = new Set(prev);
-        next.delete(script.name);
-        return next;
-      });
+      setScriptRunning(script.name, false);
       addLog(script.name, `Stopped '${script.name}'`, false);
     } catch (err) {
       addLog(script.name, `Error stopping: ${err}`, true);

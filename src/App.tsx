@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import WelcomeScreen from "./components/WelcomeScreen";
@@ -31,14 +31,22 @@ function App() {
       if (!confirmed) return;
     }
 
-    for (const script of tab.project.scripts) {
-      try {
-        await invoke("kill_script", {
-          projectPath: tab.project.path,
-          scriptName: script.name,
-        });
-      } catch {}
-    }
+    try {
+      await invoke("kill_project_scripts", {
+        projectPath: tab.project.path,
+      });
+    } catch {}
+
+    runningByPathRef.current[tab.project.path] = false;
+    setRunningProjects((prev) => {
+      if (!prev.has(tab.project.path)) {
+        return prev;
+      }
+
+      const next = new Set(prev);
+      next.delete(tab.project.path);
+      return next;
+    });
 
     closedTabsRef.current.push(tab);
     setTabs((prev) => {
@@ -102,9 +110,13 @@ function App() {
     invoke("save_recent_project", { projectPath: project.path }).catch(() => {});
   };
 
-  const handleRunningChange = (projectPath: string, hasRunning: boolean) => {
+  const handleRunningChange = useCallback((projectPath: string, hasRunning: boolean) => {
     runningByPathRef.current[projectPath] = hasRunning;
     setRunningProjects((prev) => {
+      if (hasRunning === prev.has(projectPath)) {
+        return prev;
+      }
+
       const next = new Set(prev);
       if (hasRunning) {
         next.add(projectPath);
@@ -113,7 +125,7 @@ function App() {
       }
       return next;
     });
-  };
+  }, []);
 
   const handleTabSelect = (tabId: string) => {
     setActiveTabId(tabId);

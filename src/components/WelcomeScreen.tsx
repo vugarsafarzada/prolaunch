@@ -9,6 +9,7 @@ interface Props {
 
 function WelcomeScreen({ onProjectOpen }: Props) {
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<string[]>("load_recent_projects").then(
@@ -18,6 +19,8 @@ function WelcomeScreen({ onProjectOpen }: Props) {
   }, []);
 
   const handleOpenProject = async () => {
+    setErrorMessage(null);
+
     try {
       const folder = await open({
         directory: true,
@@ -33,17 +36,21 @@ function WelcomeScreen({ onProjectOpen }: Props) {
       }
     } catch (err) {
       console.error("Failed to open project:", err);
+      setErrorMessage(String(err));
     }
   };
 
   const handleRecentOpen = async (path: string) => {
+    setErrorMessage(null);
+
     try {
       const project = await invoke<ProjectInfo>("read_package_json", {
         projectPath: path,
       });
       onProjectOpen(project);
-    } catch {
+    } catch (err) {
       setRecentProjects((prev) => prev.filter((p) => p !== path));
+      setErrorMessage(`Could not open recent project: ${String(err)}`);
     }
   };
 
@@ -75,6 +82,12 @@ function WelcomeScreen({ onProjectOpen }: Props) {
             Create New Project
           </button>
         </div>
+
+        {errorMessage && (
+          <div className="welcome-error" role="alert">
+            {errorMessage}
+          </div>
+        )}
 
         {recentProjects.length > 0 && (
           <div className="recent-section">

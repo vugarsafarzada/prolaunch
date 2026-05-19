@@ -263,6 +263,19 @@ body {
   font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
 }
 
+.welcome-error {
+  margin-bottom: 20px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 107, 107, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 107, 107, 0.08);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  word-break: break-word;
+}
+
 .recent-section {
   margin-top: 24px;
   padding-top: 20px;

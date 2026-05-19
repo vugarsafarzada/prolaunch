@@ -7,6 +7,7 @@ export interface ProjectInfo {
   name: string;
   path: string;
   scripts: ScriptInfo[];
+  packageManager: string;
 }
 
 export interface LogEvent {
