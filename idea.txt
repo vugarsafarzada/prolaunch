@@ -1,0 +1,15 @@
+App development zamanı biz əsasən terminaldan istifadə edirik. Məsələn, frontend yada backend ilə çalışan hər insan öncə terminalı açır, kommand ilə run edir. İdea odur ki bir app quraq hansı ki mac, windows, linux hamısında işləsin. Öz interfeysi olsun. 
+Misal üçün bütün JavaScript/TypeScript projectlərində run üçün lazım olan commandların hamısı package.json faylında yazılır. Yaratdığımız app hansı folderdə açılarsa ordakı package.json faylını oxuyur və kommandaları çıxarıb userə interface olaraq (Buttonlar şəklində göstərir). Və user o buttonlara click edən zaman arxada o command çağrılır və loglar userə göstərilir. Əgər kill etmək istəyərsə də ordan kill edir. Hansı portda hansı proses işlədiyini görür, idarə edir. Yəni terminalda yazılan kommandaları biz bir interfeysə yığırıq. Beləliklə devlərin işi çox rahatlaşır, əziyyət çəkmirlər terminal qarmaşığından. 
+App öz daxilində ilk açılanda proyekt yarat yada mövcud olanı aç menusu ilə gəlir. Əgər yenisini yarat seçilərsə seçimlər gəlir məsələn next js next react seçə bilirsən yanında vite ilə də yarada bilirsən və sairə. Sonra user özünə qovluq seçir və proyekt öz özünə quraşdırılır və həmin folder də açılır kommandlar və loglar görünür. Əgər mövcud olanı aç seçilərsə mövcud folder seçib açır və o folderə aid olan commandları interfeysə yerləşdirir buttonlar və loglar şəklində. Bunlardan əlavə tablar da var + iconuna vurub eyni pəncərədə bir neçə iş görə biləcək.
+Zamanla tək JS/TS deyildiginən başqa dillərdə də dəstəkləyəcək bunu nəzərə alaq ki sonra da problem olmasın, amma indi ilk iş JavaScript/TypeScript ailəsi üçün focus edək. Əsas idea terminalsız sadəcə bu desktop app ilə istifadəçini visual olaraq təmin etməkdi. 
+
+İstifadəçilər bu app -ə windows, macos, linux sistemlərində rahatlıqla yükləyib istifadə edə bilsinlər. Yükləmək üçün isə 1 yol var npm pnpm və yarn vasitəsi ilə.
+
+Əlavə xüssusiyyətlər:
+- run olan kommandlar siyahıda ən başa qalxmalıdı ki çox kommand olanda axtarmaq çətin olur.
+- kommandları search edə bilmək
+- kommandları ən üstə pinləmək
+- run olan kommandı restart etmək üçün refresh iconu ilə button
+- recently opened projects folders
+- open project destination buttonu vuranda finder (windowsda explorer) açılsın və seçilən folder project kimi açılsın içdəki kommandalarla.
+- split tab edə bilmək (horizontal və vertical split)
