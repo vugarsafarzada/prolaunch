@@ -3,12 +3,13 @@ import type { Tab } from "../types";
 interface Props {
   tabs: Tab[];
   activeTabId: string | null;
+  runningProjects: Set<string>;
   onTabSelect: (tabId: string) => void;
   onTabClose: (tabId: string) => void;
   onAddTab: () => void;
 }
 
-function TabBar({ tabs, activeTabId, onTabSelect, onTabClose, onAddTab }: Props) {
+function TabBar({ tabs, activeTabId, runningProjects, onTabSelect, onTabClose, onAddTab }: Props) {
   return (
     <div className="tab-bar">
       <div className="tab-list">
@@ -18,6 +19,7 @@ function TabBar({ tabs, activeTabId, onTabSelect, onTabClose, onAddTab }: Props)
             className={`tab ${tab.id === activeTabId ? "active" : ""}`}
             onClick={() => onTabSelect(tab.id)}
           >
+            <span className={`tab-dot ${runningProjects.has(tab.project.path) ? "running" : "idle"}`} />
             <span className="tab-label">{tab.project.name}</span>
             <button
               className="tab-close"
@@ -39,6 +41,7 @@ function TabBar({ tabs, activeTabId, onTabSelect, onTabClose, onAddTab }: Props)
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
+        <span className="tab-add-label">New Tab</span>
       </button>
     </div>
   );

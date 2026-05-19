@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import WelcomeScreen from "./components/WelcomeScreen";
@@ -11,31 +11,19 @@ function App() {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [addingTab, setAddingTab] = useState(false);
+  const [runningProjects, setRunningProjects] = useState<Set<string>>(new Set());
+  const closedTabsRef = useRef<Tab[]>([]);
+  const tabsRef = useRef(tabs);
+  const activeIdRef = useRef(activeTabId);
   const runningByPathRef = useRef<Record<string, boolean>>({});
+  tabsRef.current = tabs;
+  activeIdRef.current = activeTabId;
 
-  const handleProjectOpen = (project: ProjectInfo) => {
-    const existing = tabs.find((t) => t.project.path === project.path);
-    if (existing) {
-      setActiveTabId(existing.id);
-    } else {
-      const newTab: Tab = { id: crypto.randomUUID(), project };
-      setTabs((prev) => [...prev, newTab]);
-      setActiveTabId(newTab.id);
-    }
-    setAddingTab(false);
-    invoke("save_recent_project", { projectPath: project.path }).catch(() => {});
-  };
-
-  const handleAddTab = () => {
-    setAddingTab(true);
-    setActiveTabId(null);
-  };
-
-  const handleTabClose = async (tabId: string) => {
-    const tab = tabs.find((t) => t.id === tabId);
+  const closeTab = async (tabId: string, skipConfirm?: boolean) => {
+    const tab = tabsRef.current.find((t) => t.id === tabId);
     if (!tab) return;
 
-    if (runningByPathRef.current[tab.project.path]) {
+    if (!skipConfirm && runningByPathRef.current[tab.project.path]) {
       const confirmed = await ask(
         "This tab has running scripts. Closing will stop them. Continue?",
         { title: "Stop running scripts?", kind: "warning" },
@@ -52,21 +40,79 @@ function App() {
       } catch {}
     }
 
-    const remaining = tabs.filter((t) => t.id !== tabId);
-    setTabs(remaining);
-
-    if (activeTabId === tabId) {
-      if (remaining.length > 0) {
-        setActiveTabId(remaining[remaining.length - 1].id);
-      } else {
-        setActiveTabId(null);
-        setAddingTab(false);
+    closedTabsRef.current.push(tab);
+    setTabs((prev) => {
+      const remaining = prev.filter((t) => t.id !== tabId);
+      if (activeIdRef.current === tabId) {
+        if (remaining.length > 0) {
+          setActiveTabId(remaining[remaining.length - 1].id);
+        } else {
+          setActiveTabId(null);
+          setAddingTab(false);
+        }
       }
+      return remaining;
+    });
+  };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      if (e.key === "t" && !e.shiftKey) {
+        e.preventDefault();
+        setAddingTab(true);
+        setActiveTabId(null);
+        return;
+      }
+
+      if (e.key === "t" && e.shiftKey) {
+        e.preventDefault();
+        const stack = closedTabsRef.current;
+        if (stack.length === 0) return;
+        const tab = stack.pop()!;
+        setTabs((t) => [...t, tab]);
+        setActiveTabId(tab.id);
+        setAddingTab(false);
+        return;
+      }
+
+      if (e.key === "w") {
+        e.preventDefault();
+        const id = activeIdRef.current;
+        if (id) closeTab(id);
+        return;
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
+
+  const handleProjectOpen = (project: ProjectInfo) => {
+    const existing = tabs.find((t) => t.project.path === project.path);
+    if (existing) {
+      setActiveTabId(existing.id);
+    } else {
+      const newTab: Tab = { id: crypto.randomUUID(), project };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(newTab.id);
     }
+    setAddingTab(false);
+    invoke("save_recent_project", { projectPath: project.path }).catch(() => {});
   };
 
   const handleRunningChange = (projectPath: string, hasRunning: boolean) => {
     runningByPathRef.current[projectPath] = hasRunning;
+    setRunningProjects((prev) => {
+      const next = new Set(prev);
+      if (hasRunning) {
+        next.add(projectPath);
+      } else {
+        next.delete(projectPath);
+      }
+      return next;
+    });
   };
 
   const handleTabSelect = (tabId: string) => {
@@ -82,9 +128,10 @@ function App() {
         <TabBar
           tabs={tabs}
           activeTabId={activeTabId}
+          runningProjects={runningProjects}
           onTabSelect={handleTabSelect}
-          onTabClose={handleTabClose}
-          onAddTab={handleAddTab}
+          onTabClose={closeTab}
+          onAddTab={() => { setAddingTab(true); setActiveTabId(null); }}
         />
       )}
       <div className="app-content">
