@@ -121,64 +121,6 @@ fn kill_process_group(child: &mut Child) -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn parent_watch_script() -> &'static str {
-    r#"
-parent_pid="$1"
-manager="$2"
-run_command="$3"
-script_name="$4"
-
-"$manager" "$run_command" "$script_name" &
-child_pid=$!
-
-(
-  while kill -0 "$parent_pid" 2>/dev/null; do
-    sleep 1
-  done
-  kill -TERM -$$ 2>/dev/null
-  sleep 2
-  kill -KILL -$$ 2>/dev/null
-) &
-watcher_pid=$!
-
-wait "$child_pid"
-status=$?
-kill "$watcher_pid" 2>/dev/null
-wait "$watcher_pid" 2>/dev/null
-exit "$status"
-"#
-}
-
-#[cfg(windows)]
-fn parent_watch_script() -> &'static str {
-    r#"
-$parentId = [int]$args[0]
-$manager = $args[1]
-$runCommand = $args[2]
-$scriptName = $args[3]
-$runnerPid = $PID
-
-$watcher = Start-Job -ScriptBlock {
-  param($parentId, $runnerPid)
-  while (Get-Process -Id $parentId -ErrorAction SilentlyContinue) {
-    Start-Sleep -Seconds 1
-  }
-  & taskkill.exe /F /T /PID $runnerPid | Out-Null
-} -ArgumentList $parentId, $runnerPid
-
-try {
-  & $manager $runCommand $scriptName
-  $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
-} finally {
-  Stop-Job -Job $watcher -ErrorAction SilentlyContinue | Out-Null
-  Remove-Job -Job $watcher -Force -ErrorAction SilentlyContinue | Out-Null
-}
-
-exit $exitCode
-"#
-}
-
-#[cfg(unix)]
 fn creation_parent_watch_script() -> &'static str {
     r#"
 parent_pid="$1"
@@ -236,22 +178,68 @@ exit $exitCode
 "#
 }
 
-fn script_command(package_manager: &str, script_name: &str) -> Command {
-    let manager_command = package_manager_command(package_manager);
-    let run_command = package_manager_run_command(package_manager);
+fn script_invocation(
+    app: &AppHandle,
+    package_manager: &str,
+    script_name: &str,
+) -> Result<ToolCommand, String> {
+    let run_command = package_manager_run_command(package_manager).to_string();
+
+    if package_manager == "composer" {
+        let system_composer = composer_bin();
+        if command_output(&system_composer, &["--version".to_string()], None).is_ok() {
+            return Ok(ToolCommand {
+                program: system_composer,
+                args: vec![run_command, script_name.to_string()],
+            });
+        }
+
+        let composer_path = app_managed_composer_path(app)?;
+        let composer_path_arg = composer_path.to_string_lossy().to_string();
+        if composer_path.exists()
+            && command_output(
+                &php_bin(),
+                &[composer_path_arg.clone(), "--version".to_string()],
+                None,
+            )
+            .is_ok()
+        {
+            return Ok(ToolCommand {
+                program: php_bin(),
+                args: vec![composer_path_arg, run_command, script_name.to_string()],
+            });
+        }
+
+        return Err(
+            "Composer is required to run this PHP script. Create a PHP project once with ProLaunch setup, or install Composer on PATH."
+                .to_string(),
+        );
+    }
+
+    Ok(ToolCommand {
+        program: package_manager_command(package_manager),
+        args: vec![run_command, script_name.to_string()],
+    })
+}
+
+fn script_command(
+    app: &AppHandle,
+    package_manager: &str,
+    script_name: &str,
+) -> Result<Command, String> {
+    let invocation = script_invocation(app, package_manager, script_name)?;
     let parent_pid = std::process::id().to_string();
 
     #[cfg(unix)]
     {
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
-            .arg(parent_watch_script())
+            .arg(creation_parent_watch_script())
             .arg("prolaunch-runner")
             .arg(parent_pid)
-            .arg(manager_command)
-            .arg(run_command)
-            .arg(script_name);
-        cmd
+            .arg(&invocation.program)
+            .args(&invocation.args);
+        Ok(cmd)
     }
 
     #[cfg(windows)]
@@ -263,12 +251,11 @@ fn script_command(package_manager: &str, script_name: &str) -> Command {
             .arg("-ExecutionPolicy")
             .arg("Bypass")
             .arg("-Command")
-            .arg(parent_watch_script())
+            .arg(creation_parent_watch_script())
             .arg(parent_pid)
-            .arg(manager_command)
-            .arg(run_command)
-            .arg(script_name);
-        cmd
+            .arg(&invocation.program)
+            .args(&invocation.args);
+        Ok(cmd)
     }
 }
 
@@ -320,6 +307,26 @@ struct CreationStep {
     program: String,
     args: Vec<String>,
     cwd: PathBuf,
+    display_command: Option<String>,
+}
+
+#[derive(Clone)]
+struct ToolCommand {
+    program: String,
+    args: Vec<String>,
+}
+
+struct CreateToolchain {
+    composer: Option<ToolCommand>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToolRequirement {
+    Node,
+    Npm,
+    Npx,
+    Php,
+    Composer,
 }
 
 fn npm_bin() -> String {
@@ -340,6 +347,328 @@ fn npx_bin() -> String {
 
 fn composer_bin() -> String {
     package_manager_command("composer")
+}
+
+fn php_bin() -> String {
+    "php".to_string()
+}
+
+fn node_bin() -> String {
+    "node".to_string()
+}
+
+fn command_output(program: &str, args: &[String], cwd: Option<&Path>) -> Result<String, String> {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+
+    let output = command
+        .output()
+        .map_err(|e| format!("{} failed to start: {}", program, e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if output.status.success() {
+        Ok(command_output_excerpt(&stdout, &stderr))
+    } else {
+        let details = command_output_excerpt(&stdout, &stderr);
+        Err(if details.is_empty() {
+            format!("{} exited with status {}", program, output.status)
+        } else {
+            details
+        })
+    }
+}
+
+fn first_output_line(output: &str) -> String {
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("ready")
+        .to_string()
+}
+
+fn check_required_tool(
+    app: &AppHandle,
+    creation_id: &str,
+    label: &str,
+    program: String,
+    version_args: Vec<String>,
+) -> Result<String, String> {
+    emit_create_log(app, creation_id, format!("Checking {}...", label), false);
+
+    match command_output(&program, &version_args, None) {
+        Ok(output) => {
+            let version = first_output_line(&output);
+            emit_create_log(
+                app,
+                creation_id,
+                format!("{} found: {}", label, version),
+                false,
+            );
+            Ok(version)
+        }
+        Err(details) => Err(format!(
+            "{} is required for this template but was not found or could not run.\n{}",
+            label, details
+        )),
+    }
+}
+
+fn app_managed_composer_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let mut dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    dir.push("tools");
+    dir.push("composer");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to prepare tool cache: {}", e))?;
+    Ok(dir.join("composer.phar"))
+}
+
+fn managed_composer_command(composer_path: &Path) -> ToolCommand {
+    ToolCommand {
+        program: php_bin(),
+        args: vec![composer_path.to_string_lossy().to_string()],
+    }
+}
+
+fn verify_managed_composer(app: &AppHandle, creation_id: &str, composer_path: &Path) -> bool {
+    if !composer_path.exists() {
+        return false;
+    }
+
+    let args = vec![
+        composer_path.to_string_lossy().to_string(),
+        "--version".to_string(),
+    ];
+
+    match command_output(&php_bin(), &args, None) {
+        Ok(output) => {
+            emit_create_log(
+                app,
+                creation_id,
+                format!(
+                    "Using ProLaunch-managed Composer: {}",
+                    first_output_line(&output)
+                ),
+                false,
+            );
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn composer_install_steps(composer_path: &Path) -> Result<Vec<CreationStep>, String> {
+    let cache_dir = composer_path
+        .parent()
+        .ok_or_else(|| "Failed to resolve Composer cache folder".to_string())?;
+    let install_dir = cache_dir.to_string_lossy().to_string();
+    let composer_file = composer_path.to_string_lossy().to_string();
+
+    let download_installer = r#"
+$ok = copy('https://getcomposer.org/installer', 'composer-setup.php');
+if (!$ok) {
+    fwrite(STDERR, "Could not download Composer installer\n");
+    exit(1);
+}
+echo "Composer installer downloaded\n";
+"#;
+
+    let verify_installer = r#"
+$expected = trim(file_get_contents('https://composer.github.io/installer.sig'));
+$actual = hash_file('sha384', 'composer-setup.php');
+if (!$expected || !hash_equals($expected, $actual)) {
+    @unlink('composer-setup.php');
+    fwrite(STDERR, "Invalid Composer installer checksum\n");
+    exit(1);
+}
+echo "Composer installer verified\n";
+"#;
+
+    Ok(vec![
+        creation_step_with_display(
+            "Download Composer installer",
+            php_bin(),
+            vec!["-r".to_string(), download_installer.to_string()],
+            cache_dir,
+            "$ php -r \"download Composer installer\"".to_string(),
+        ),
+        creation_step_with_display(
+            "Verify Composer installer",
+            php_bin(),
+            vec!["-r".to_string(), verify_installer.to_string()],
+            cache_dir,
+            "$ php -r \"verify Composer installer\"".to_string(),
+        ),
+        creation_step_with_display(
+            "Install Composer for ProLaunch",
+            php_bin(),
+            vec![
+                "composer-setup.php".to_string(),
+                "--quiet".to_string(),
+                "--install-dir".to_string(),
+                install_dir,
+                "--filename".to_string(),
+                "composer.phar".to_string(),
+            ],
+            cache_dir,
+            format!(
+                "$ php composer-setup.php --install-dir <ProLaunch tools> --filename composer.phar"
+            ),
+        ),
+        creation_step_with_display(
+            "Verify Composer",
+            php_bin(),
+            vec![composer_file, "--version".to_string()],
+            cache_dir,
+            "$ php <ProLaunch tools>/composer.phar --version".to_string(),
+        ),
+    ])
+}
+
+fn prepare_composer(
+    app: &AppHandle,
+    state: &AppState,
+    creation_id: &str,
+) -> Result<ToolCommand, String> {
+    emit_create_log(app, creation_id, "Checking Composer...".to_string(), false);
+    let system_composer = composer_bin();
+    let version_args = vec!["--version".to_string()];
+
+    if let Ok(output) = command_output(&system_composer, &version_args, None) {
+        emit_create_log(
+            app,
+            creation_id,
+            format!("Composer found: {}", first_output_line(&output)),
+            false,
+        );
+        return Ok(ToolCommand {
+            program: system_composer,
+            args: Vec::new(),
+        });
+    }
+
+    emit_create_log(
+        app,
+        creation_id,
+        "Composer not found on PATH. Preparing ProLaunch-managed Composer...".to_string(),
+        false,
+    );
+
+    let composer_path = app_managed_composer_path(app)?;
+    if verify_managed_composer(app, creation_id, &composer_path) {
+        return Ok(managed_composer_command(&composer_path));
+    }
+
+    if composer_path.exists() {
+        let _ = std::fs::remove_file(&composer_path);
+    }
+
+    let install_steps = composer_install_steps(&composer_path)?;
+    for step in &install_steps {
+        run_creation_step(app, state, creation_id, step)?;
+    }
+
+    let installer_path = composer_path
+        .parent()
+        .map(|dir| dir.join("composer-setup.php"));
+    if let Some(installer_path) = installer_path {
+        let _ = std::fs::remove_file(installer_path);
+    }
+
+    emit_create_log(
+        app,
+        creation_id,
+        "Composer installed for ProLaunch and will be reused next time.".to_string(),
+        false,
+    );
+
+    Ok(managed_composer_command(&composer_path))
+}
+
+fn template_requirements(template_id: &str) -> Result<Vec<ToolRequirement>, String> {
+    let requirements = match template_id {
+        "vite-react-ts" | "vite-react-js" | "vite-vue-ts" | "vite-vue-js" | "nuxt-ts-latest"
+        | "nuxt-js-latest" | "vite-svelte-ts" | "vite-svelte-js" | "next-ts-latest"
+        | "next-js-latest" | "next-ts-16" | "next-js-16" | "next-ts-15" | "next-js-15"
+        | "next-ts-14" | "next-js-14" | "cra-ts" | "cra-js" | "angular-ts-latest" => {
+            vec![
+                ToolRequirement::Node,
+                ToolRequirement::Npm,
+                ToolRequirement::Npx,
+            ]
+        }
+        "laravel-php-latest"
+        | "symfony-php-latest"
+        | "slim-php-latest"
+        | "codeigniter-php-latest" => vec![ToolRequirement::Php, ToolRequirement::Composer],
+        _ => return Err(format!("Unknown project template '{}'", template_id)),
+    };
+
+    Ok(requirements)
+}
+
+fn prepare_create_toolchain(
+    app: &AppHandle,
+    state: &AppState,
+    creation_id: &str,
+    template_id: &str,
+) -> Result<CreateToolchain, String> {
+    let requirements = template_requirements(template_id)?;
+    let mut toolchain = CreateToolchain { composer: None };
+
+    if requirements.contains(&ToolRequirement::Node) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Node.js",
+            node_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Npm) {
+        check_required_tool(
+            app,
+            creation_id,
+            "npm",
+            npm_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Npx) {
+        check_required_tool(
+            app,
+            creation_id,
+            "npx",
+            npx_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Php) {
+        check_required_tool(
+            app,
+            creation_id,
+            "PHP CLI",
+            php_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Composer) {
+        toolchain.composer = Some(prepare_composer(app, state, creation_id)?);
+    }
+
+    emit_create_log(app, creation_id, "Requirements ready.".to_string(), false);
+    Ok(toolchain)
 }
 
 fn validate_project_name(project_name: &str) -> Result<(), String> {
@@ -379,6 +708,38 @@ fn creation_step(label: &str, program: String, args: Vec<&str>, cwd: &Path) -> C
         program,
         args: args.into_iter().map(str::to_string).collect(),
         cwd: cwd.to_path_buf(),
+        display_command: None,
+    }
+}
+
+fn creation_step_from_strings(
+    label: &str,
+    program: String,
+    args: Vec<String>,
+    cwd: &Path,
+) -> CreationStep {
+    CreationStep {
+        label: label.to_string(),
+        program,
+        args,
+        cwd: cwd.to_path_buf(),
+        display_command: None,
+    }
+}
+
+fn creation_step_with_display(
+    label: &str,
+    program: String,
+    args: Vec<String>,
+    cwd: &Path,
+    display_command: String,
+) -> CreationStep {
+    CreationStep {
+        label: label.to_string(),
+        program,
+        args,
+        cwd: cwd.to_path_buf(),
+        display_command: Some(display_command),
     }
 }
 
@@ -442,12 +803,12 @@ fn next_steps(
         args.push("--disable-git".to_string());
     }
 
-    vec![CreationStep {
-        label: "Create Next.js project".to_string(),
-        program: npx_bin(),
+    vec![creation_step_from_strings(
+        "Create Next.js project",
+        npx_bin(),
         args,
-        cwd: parent_dir.to_path_buf(),
-    }]
+        parent_dir,
+    )]
 }
 
 fn cra_steps(use_typescript: bool, project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
@@ -461,12 +822,12 @@ fn cra_steps(use_typescript: bool, project_name: &str, parent_dir: &Path) -> Vec
         args.push("typescript".to_string());
     }
 
-    vec![CreationStep {
-        label: "Create React App project".to_string(),
-        program: npx_bin(),
+    vec![creation_step_from_strings(
+        "Create React App project",
+        npx_bin(),
         args,
-        cwd: parent_dir.to_path_buf(),
-    }]
+        parent_dir,
+    )]
 }
 
 fn nuxt_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
@@ -493,17 +854,21 @@ fn composer_create_project_steps(
     package: &str,
     project_name: &str,
     parent_dir: &Path,
+    composer: &ToolCommand,
 ) -> Vec<CreationStep> {
-    vec![creation_step(
+    let mut args = composer.args.clone();
+    args.extend([
+        "create-project".to_string(),
+        "--no-interaction".to_string(),
+        "--no-progress".to_string(),
+        package.to_string(),
+        project_name.to_string(),
+    ]);
+
+    vec![creation_step_from_strings(
         label,
-        composer_bin(),
-        vec![
-            "create-project",
-            "--no-interaction",
-            "--no-progress",
-            package,
-            project_name,
-        ],
+        composer.program.clone(),
+        args,
         parent_dir,
     )]
 }
@@ -537,7 +902,9 @@ fn creation_steps(
     project_name: &str,
     parent_dir: &Path,
     target_dir: &Path,
+    toolchain: &CreateToolchain,
 ) -> Result<Vec<CreationStep>, String> {
+    let composer = toolchain.composer.as_ref();
     let steps = match template_id {
         "vite-react-ts" => vite_steps("react-ts", project_name, parent_dir, target_dir),
         "vite-react-js" => vite_steps("react", project_name, parent_dir, target_dir),
@@ -552,24 +919,28 @@ fn creation_steps(
             "laravel/laravel",
             project_name,
             parent_dir,
+            composer.ok_or_else(|| "Composer was not prepared".to_string())?,
         ),
         "symfony-php-latest" => composer_create_project_steps(
             "Create Symfony project",
             "symfony/skeleton",
             project_name,
             parent_dir,
+            composer.ok_or_else(|| "Composer was not prepared".to_string())?,
         ),
         "slim-php-latest" => composer_create_project_steps(
             "Create Slim project",
             "slim/slim-skeleton",
             project_name,
             parent_dir,
+            composer.ok_or_else(|| "Composer was not prepared".to_string())?,
         ),
         "codeigniter-php-latest" => composer_create_project_steps(
             "Create CodeIgniter project",
             "codeigniter4/appstarter",
             project_name,
             parent_dir,
+            composer.ok_or_else(|| "Composer was not prepared".to_string())?,
         ),
         "next-ts-latest" => next_steps("latest", true, project_name, parent_dir),
         "next-js-latest" => next_steps("latest", false, project_name, parent_dir),
@@ -749,12 +1120,11 @@ fn run_creation_step(
     step: &CreationStep,
 ) -> Result<(), String> {
     emit_create_log(app, creation_id, format!("{}...", step.label), false);
-    emit_create_log(
-        app,
-        creation_id,
-        format!("$ {} {}", step.program, step.args.join(" ")),
-        false,
-    );
+    let display_command = step
+        .display_command
+        .clone()
+        .unwrap_or_else(|| format!("$ {} {}", step.program, step.args.join(" ")));
+    emit_create_log(app, creation_id, display_command, false);
 
     let mut command = creation_command(step);
     command
@@ -860,8 +1230,15 @@ async fn create_project(
             return Err("Target folder already exists".to_string());
         }
 
-        let steps = creation_steps(&template_id, &project_name, &parent_path, &target_path)?;
         let state = app.state::<AppState>();
+        let toolchain = prepare_create_toolchain(&app, &state, &creation_id, &template_id)?;
+        let steps = creation_steps(
+            &template_id,
+            &project_name,
+            &parent_path,
+            &target_path,
+            &toolchain,
+        )?;
         for step in &steps {
             run_creation_step(&app, &state, &creation_id, step)?;
         }
@@ -1025,7 +1402,7 @@ fn run_script(
     }
 
     let package_manager = normalize_package_manager(package_manager, &project_path);
-    let mut cmd = script_command(&package_manager, &script_name);
+    let mut cmd = script_command(&app, &package_manager, &script_name)?;
     cmd.current_dir(&project_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
