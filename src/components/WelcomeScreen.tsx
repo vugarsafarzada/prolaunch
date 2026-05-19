@@ -7,6 +7,12 @@ interface Props {
   onProjectOpen: (project: ProjectInfo) => void;
 }
 
+function shortenPath(path: string): string {
+  const parts = path.split(/[/\\]/).filter(Boolean);
+  if (parts.length <= 3) return path;
+  return ".../" + parts.slice(-3).join("/");
+}
+
 function WelcomeScreen({ onProjectOpen }: Props) {
   const [recentProjects, setRecentProjects] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -103,7 +109,7 @@ function WelcomeScreen({ onProjectOpen }: Props) {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                   </svg>
-                  <span className="recent-path">{path}</span>
+                  <span className="recent-path">{shortenPath(path)}</span>
                 </button>
               ))}
             </div>

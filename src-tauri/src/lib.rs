@@ -5,6 +5,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Mutex,
 };
+#[cfg(unix)]
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -562,33 +563,50 @@ fn open_in_terminal(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         Command::new("cmd")
-            .args(["/C", "start", "cmd", "/K", &format!("cd /d \"{}\"", path)])
+            .args(["/C", "start", "", "cmd.exe", "/K", "cd", "/d", &path])
             .spawn()
             .map_err(|e| format!("Failed to open Terminal: {}", e))?;
     }
     #[cfg(target_os = "linux")]
     {
-        let terminal = if Command::new("which")
-            .arg("gnome-terminal")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            "gnome-terminal"
-        } else if Command::new("which")
-            .arg("xterm")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            "xterm"
+        fn command_exists(name: &str) -> bool {
+            Command::new("which")
+                .arg(name)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
+
+        if command_exists("gnome-terminal") {
+            Command::new("gnome-terminal")
+                .arg(format!("--working-directory={}", path))
+                .spawn()
+                .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+        } else if command_exists("konsole") {
+            Command::new("konsole")
+                .args(["--workdir", &path])
+                .spawn()
+                .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+        } else if command_exists("xfce4-terminal") {
+            Command::new("xfce4-terminal")
+                .args(["--working-directory", &path])
+                .spawn()
+                .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+        } else if command_exists("xterm") {
+            Command::new("xterm")
+                .args([
+                    "-e",
+                    "sh",
+                    "-lc",
+                    "cd \"$1\" && exec \"${SHELL:-sh}\"",
+                    "prolaunch-terminal",
+                    &path,
+                ])
+                .spawn()
+                .map_err(|e| format!("Failed to open Terminal: {}", e))?;
         } else {
             return Err("No supported terminal found".to_string());
-        };
-        Command::new(terminal)
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+        }
     }
     Ok(())
 }
