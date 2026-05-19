@@ -769,6 +769,11 @@ body {
   background: rgba(76, 154, 255, 0.08);
 }
 
+.create-progress-hero.failed {
+  border-color: rgba(255, 107, 107, 0.35);
+  background: rgba(255, 107, 107, 0.08);
+}
+
 .create-progress-hero strong {
   display: block;
   color: var(--text-primary);
@@ -790,6 +795,22 @@ body {
   border-radius: 50%;
   flex-shrink: 0;
   animation: spin 800ms linear infinite;
+}
+
+.create-status-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.create-status-icon.error {
+  color: var(--danger);
+  border: 1px solid rgba(255, 107, 107, 0.55);
+  background: rgba(255, 107, 107, 0.1);
 }
 
 .create-log-panel {

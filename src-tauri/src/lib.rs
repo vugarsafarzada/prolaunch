@@ -125,9 +125,10 @@ fn parent_watch_script() -> &'static str {
     r#"
 parent_pid="$1"
 manager="$2"
-script_name="$3"
+run_command="$3"
+script_name="$4"
 
-"$manager" run "$script_name" &
+"$manager" "$run_command" "$script_name" &
 child_pid=$!
 
 (
@@ -153,7 +154,8 @@ fn parent_watch_script() -> &'static str {
     r#"
 $parentId = [int]$args[0]
 $manager = $args[1]
-$scriptName = $args[2]
+$runCommand = $args[2]
+$scriptName = $args[3]
 $runnerPid = $PID
 
 $watcher = Start-Job -ScriptBlock {
@@ -165,7 +167,7 @@ $watcher = Start-Job -ScriptBlock {
 } -ArgumentList $parentId, $runnerPid
 
 try {
-  & $manager run $scriptName
+  & $manager $runCommand $scriptName
   $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
 } finally {
   Stop-Job -Job $watcher -ErrorAction SilentlyContinue | Out-Null
@@ -236,6 +238,7 @@ exit $exitCode
 
 fn script_command(package_manager: &str, script_name: &str) -> Command {
     let manager_command = package_manager_command(package_manager);
+    let run_command = package_manager_run_command(package_manager);
     let parent_pid = std::process::id().to_string();
 
     #[cfg(unix)]
@@ -246,6 +249,7 @@ fn script_command(package_manager: &str, script_name: &str) -> Command {
             .arg("prolaunch-runner")
             .arg(parent_pid)
             .arg(manager_command)
+            .arg(run_command)
             .arg(script_name);
         cmd
     }
@@ -262,13 +266,16 @@ fn script_command(package_manager: &str, script_name: &str) -> Command {
             .arg(parent_watch_script())
             .arg(parent_pid)
             .arg(manager_command)
+            .arg(run_command)
             .arg(script_name);
         cmd
     }
 }
 
 fn preferred_package_manager(path: &std::path::Path) -> String {
-    if path.join("pnpm-lock.yaml").exists() {
+    if path.join("composer.json").exists() {
+        "composer".to_string()
+    } else if path.join("pnpm-lock.yaml").exists() {
         "pnpm".to_string()
     } else if path.join("yarn.lock").exists() || path.join(".yarnrc.yml").exists() {
         "yarn".to_string()
@@ -281,16 +288,30 @@ fn preferred_package_manager(path: &std::path::Path) -> String {
 
 fn normalize_package_manager(package_manager: Option<String>, project_path: &str) -> String {
     match package_manager.as_deref() {
-        Some("npm") | Some("pnpm") | Some("yarn") | Some("bun") => package_manager.unwrap(),
+        Some("npm") | Some("pnpm") | Some("yarn") | Some("bun") | Some("composer") => {
+            package_manager.unwrap()
+        }
         _ => preferred_package_manager(std::path::Path::new(project_path)),
     }
 }
 
 fn package_manager_command(package_manager: &str) -> String {
-    if cfg!(target_os = "windows") && package_manager != "bun" {
-        format!("{}.cmd", package_manager)
+    if cfg!(target_os = "windows") {
+        return match package_manager {
+            "bun" => "bun".to_string(),
+            "composer" => "composer.bat".to_string(),
+            _ => format!("{}.cmd", package_manager),
+        };
+    }
+
+    package_manager.to_string()
+}
+
+fn package_manager_run_command(package_manager: &str) -> &'static str {
+    if package_manager == "composer" {
+        "run-script"
     } else {
-        package_manager.to_string()
+        "run"
     }
 }
 
@@ -315,6 +336,10 @@ fn npx_bin() -> String {
     } else {
         "npx".to_string()
     }
+}
+
+fn composer_bin() -> String {
+    package_manager_command("composer")
 }
 
 fn validate_project_name(project_name: &str) -> Result<(), String> {
@@ -463,6 +488,26 @@ fn nuxt_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
     )]
 }
 
+fn composer_create_project_steps(
+    label: &str,
+    package: &str,
+    project_name: &str,
+    parent_dir: &Path,
+) -> Vec<CreationStep> {
+    vec![creation_step(
+        label,
+        composer_bin(),
+        vec![
+            "create-project",
+            "--no-interaction",
+            "--no-progress",
+            package,
+            project_name,
+        ],
+        parent_dir,
+    )]
+}
+
 fn angular_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
     vec![creation_step(
         "Create Angular project",
@@ -502,6 +547,30 @@ fn creation_steps(
         "nuxt-js-latest" => nuxt_steps(project_name, parent_dir),
         "vite-svelte-ts" => vite_steps("svelte-ts", project_name, parent_dir, target_dir),
         "vite-svelte-js" => vite_steps("svelte", project_name, parent_dir, target_dir),
+        "laravel-php-latest" => composer_create_project_steps(
+            "Create Laravel project",
+            "laravel/laravel",
+            project_name,
+            parent_dir,
+        ),
+        "symfony-php-latest" => composer_create_project_steps(
+            "Create Symfony project",
+            "symfony/skeleton",
+            project_name,
+            parent_dir,
+        ),
+        "slim-php-latest" => composer_create_project_steps(
+            "Create Slim project",
+            "slim/slim-skeleton",
+            project_name,
+            parent_dir,
+        ),
+        "codeigniter-php-latest" => composer_create_project_steps(
+            "Create CodeIgniter project",
+            "codeigniter4/appstarter",
+            project_name,
+            parent_dir,
+        ),
         "next-ts-latest" => next_steps("latest", true, project_name, parent_dir),
         "next-js-latest" => next_steps("latest", false, project_name, parent_dir),
         "next-ts-16" => next_steps("16", true, project_name, parent_dir),
@@ -812,8 +881,26 @@ async fn create_project(
 
 #[tauri::command]
 fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
-    let project_dir = Path::new(&project_path);
+    let project_dir = PathBuf::from(&project_path);
+    let composer_path = project_dir.join("composer.json");
     let package_path = project_dir.join("package.json");
+
+    if composer_path.exists() {
+        return read_composer_project(project_path, &project_dir, &composer_path);
+    }
+
+    if package_path.exists() {
+        return read_node_project(project_path, &project_dir, &package_path);
+    }
+
+    Err("No package.json or composer.json found in selected folder".to_string())
+}
+
+fn read_node_project(
+    project_path: String,
+    project_dir: &Path,
+    package_path: &Path,
+) -> Result<ProjectInfo, String> {
     let content = std::fs::read_to_string(&package_path)
         .map_err(|e| format!("Failed to read package.json: {}", e))?;
 
@@ -847,6 +934,77 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
         path: project_path,
         scripts,
         package_manager,
+    })
+}
+
+fn composer_script_command(cmd: &serde_json::Value) -> String {
+    if let Some(command) = cmd.as_str() {
+        return command.to_string();
+    }
+
+    if let Some(commands) = cmd.as_array() {
+        return commands
+            .iter()
+            .filter_map(|item| item.as_str())
+            .collect::<Vec<_>>()
+            .join(" && ");
+    }
+
+    String::new()
+}
+
+fn is_composer_lifecycle_script(name: &str) -> bool {
+    name == "auto-scripts" || name.starts_with("pre-") || name.starts_with("post-")
+}
+
+fn composer_project_name(project_dir: &Path, parsed: &serde_json::Value) -> String {
+    project_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .or_else(|| {
+            parsed
+                .get("name")
+                .and_then(|name| name.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "Untitled Project".to_string())
+}
+
+fn read_composer_project(
+    project_path: String,
+    project_dir: &Path,
+    composer_path: &Path,
+) -> Result<ProjectInfo, String> {
+    let content = std::fs::read_to_string(composer_path)
+        .map_err(|e| format!("Failed to read composer.json: {}", e))?;
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid composer.json: {}", e))?;
+
+    let project_name = composer_project_name(project_dir, &parsed);
+
+    let scripts: Vec<ScriptInfo> = parsed
+        .get("scripts")
+        .and_then(|scripts| scripts.as_object())
+        .map(|scripts_obj| {
+            scripts_obj
+                .iter()
+                .filter(|(name, _)| !is_composer_lifecycle_script(name))
+                .map(|(name, cmd)| ScriptInfo {
+                    name: name.clone(),
+                    command: composer_script_command(cmd),
+                })
+                .filter(|script| !script.command.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(ProjectInfo {
+        name: project_name,
+        path: project_path,
+        scripts,
+        package_manager: "composer".to_string(),
     })
 }
 
@@ -1055,6 +1213,10 @@ fn get_running_scripts(state: State<'_, AppState>) -> Result<Vec<String>, String
 fn detect_package_managers(project_path: String) -> Result<Vec<String>, String> {
     let mut managers = Vec::new();
     let path = std::path::Path::new(&project_path);
+
+    if path.join("composer.json").exists() {
+        managers.push("composer".to_string());
+    }
 
     if path.join("package.json").exists() {
         managers.push("npm".to_string());
