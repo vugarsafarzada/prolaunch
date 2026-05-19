@@ -68,6 +68,20 @@ function App() {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
+      if (!e.shiftKey && !e.altKey && /^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        const currentTabs = tabsRef.current;
+        if (currentTabs.length === 0) return;
+
+        const tabIndex = e.key === "0" ? currentTabs.length - 1 : Number(e.key) - 1;
+        const tab = currentTabs[tabIndex];
+        if (!tab) return;
+
+        setActiveTabId(tab.id);
+        setAddingTab(false);
+        return;
+      }
+
       if (e.key === "t" && !e.shiftKey) {
         e.preventDefault();
         setAddingTab(true);

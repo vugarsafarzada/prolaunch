@@ -23,4 +23,8 @@ Zamanla tək JS/TS deyildiginən başqa dillərdə də dəstəkləyəcək bunu n
 [x] run olan kommandı restart (stop and run again) etmək üçün refresh iconu ilə button
 [x] recently opened projects folders
 [x] hər hansı bir project açıldıqdan sonra sol üstdə proyektin adının yanında folder iconu olacaq (open project destination) vuranda finder (windowsda explorer) açılsın.
-[x] shortcuts əlavə et new tab üçün (ctrl+t/cmd+t), bağlanan tabı geri açmaq üçün (ctrl+shift+t/cmd+shift+t).
+[x] shortcuts əlavə et new tab üçün (ctrl+t/cmd+t), bağlanan tabı geri açmaq üçün (ctrl+shift+t/cmd+shift+t). 
+[] Yeni short cutlar əlavə edək
+ctrl/cmd - 0 ən sonuncu tab
+ctrl/cmd - 1...9 sırası ilə tabları açmaq üçün
+Qısa məntiq eyni browserlərdə olduğu kimi

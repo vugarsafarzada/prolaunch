@@ -1,16 +1,17 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Mutex,
 };
-#[cfg(unix)]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState {
     running_processes: Mutex<HashMap<String, RunningProcess>>,
+    creation_processes: Mutex<HashMap<u64, u32>>,
     next_run_id: AtomicU64,
 }
 
@@ -47,6 +48,32 @@ struct ProjectInfo {
     scripts: Vec<ScriptInfo>,
     #[serde(rename = "packageManager")]
     package_manager: String,
+}
+
+fn kill_process_id(pid: u32) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-TERM", &format!("-{}", pid)])
+            .status();
+        std::thread::sleep(Duration::from_secs(2));
+        let _ = Command::new("kill")
+            .args(["-KILL", &format!("-{}", pid)])
+            .status();
+    }
+
+    #[cfg(windows)]
+    {
+        let output = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output()
+            .map_err(|e| format!("taskkill failed: {}", e))?;
+        if !output.status.success() {
+            return Err(format!("taskkill failed for PID {}", pid));
+        }
+    }
+
+    Ok(())
 }
 
 fn kill_process_group(child: &mut Child) -> Result<(), String> {
@@ -142,6 +169,64 @@ exit $exitCode
 "#
 }
 
+#[cfg(unix)]
+fn creation_parent_watch_script() -> &'static str {
+    r#"
+parent_pid="$1"
+shift
+
+"$@" &
+child_pid=$!
+
+(
+  while kill -0 "$parent_pid" 2>/dev/null; do
+    sleep 1
+  done
+  kill -TERM -$$ 2>/dev/null
+  sleep 2
+  kill -KILL -$$ 2>/dev/null
+) &
+watcher_pid=$!
+
+wait "$child_pid"
+status=$?
+kill "$watcher_pid" 2>/dev/null
+wait "$watcher_pid" 2>/dev/null
+exit "$status"
+"#
+}
+
+#[cfg(windows)]
+fn creation_parent_watch_script() -> &'static str {
+    r#"
+$parentId = [int]$args[0]
+$program = $args[1]
+$programArgs = @()
+if ($args.Length -gt 2) {
+  $programArgs = $args[2..($args.Length - 1)]
+}
+$runnerPid = $PID
+
+$watcher = Start-Job -ScriptBlock {
+  param($parentId, $runnerPid)
+  while (Get-Process -Id $parentId -ErrorAction SilentlyContinue) {
+    Start-Sleep -Seconds 1
+  }
+  & taskkill.exe /F /T /PID $runnerPid | Out-Null
+} -ArgumentList $parentId, $runnerPid
+
+try {
+  & $program @programArgs
+  $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+} finally {
+  Stop-Job -Job $watcher -ErrorAction SilentlyContinue | Out-Null
+  Remove-Job -Job $watcher -Force -ErrorAction SilentlyContinue | Out-Null
+}
+
+exit $exitCode
+"#
+}
+
 fn script_command(package_manager: &str, script_name: &str) -> Command {
     let manager_command = package_manager_command(package_manager);
     let parent_pid = std::process::id().to_string();
@@ -202,9 +287,398 @@ fn package_manager_command(package_manager: &str) -> String {
     }
 }
 
+struct CreationStep {
+    label: String,
+    program: String,
+    args: Vec<String>,
+    cwd: PathBuf,
+}
+
+fn npm_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "npm.cmd".to_string()
+    } else {
+        "npm".to_string()
+    }
+}
+
+fn npx_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "npx.cmd".to_string()
+    } else {
+        "npx".to_string()
+    }
+}
+
+fn validate_project_name(project_name: &str) -> Result<(), String> {
+    let name = project_name.trim();
+    if name.is_empty() {
+        return Err("Project name is required".to_string());
+    }
+    if name != project_name {
+        return Err("Project name cannot start or end with whitespace".to_string());
+    }
+    if matches!(name, "." | "..") {
+        return Err("Project name is not valid".to_string());
+    }
+    if name
+        .chars()
+        .any(|c| !(c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-' | '_')))
+    {
+        return Err(
+            "Project name can only use lowercase letters, numbers, dots, dashes, or underscores"
+                .to_string(),
+        );
+    }
+    if !name
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        .unwrap_or(false)
+    {
+        return Err("Project name must start with a lowercase letter or number".to_string());
+    }
+    Ok(())
+}
+
+fn creation_step(label: &str, program: String, args: Vec<&str>, cwd: &Path) -> CreationStep {
+    CreationStep {
+        label: label.to_string(),
+        program,
+        args: args.into_iter().map(str::to_string).collect(),
+        cwd: cwd.to_path_buf(),
+    }
+}
+
+fn vite_steps(
+    template: &str,
+    project_name: &str,
+    parent_dir: &Path,
+    target_dir: &Path,
+) -> Vec<CreationStep> {
+    vec![
+        creation_step(
+            "Create Vite project",
+            npx_bin(),
+            vec![
+                "-y",
+                "create-vite@latest",
+                project_name,
+                "--template",
+                template,
+                "--no-interactive",
+            ],
+            parent_dir,
+        ),
+        creation_step(
+            "Install dependencies",
+            npm_bin(),
+            vec!["install"],
+            target_dir,
+        ),
+    ]
+}
+
+fn next_steps(
+    version: &str,
+    use_typescript: bool,
+    project_name: &str,
+    parent_dir: &Path,
+) -> Vec<CreationStep> {
+    let package = if version == "latest" {
+        "create-next-app@latest".to_string()
+    } else {
+        format!("create-next-app@{}", version)
+    };
+    let language_flag = if use_typescript { "--ts" } else { "--js" };
+    let mut args = vec![
+        "-y".to_string(),
+        package,
+        project_name.to_string(),
+        language_flag.to_string(),
+        "--eslint".to_string(),
+        "--tailwind".to_string(),
+        "--app".to_string(),
+        "--src-dir".to_string(),
+        "--import-alias".to_string(),
+        "@/*".to_string(),
+        "--use-npm".to_string(),
+    ];
+
+    if version != "14" {
+        args.push("--yes".to_string());
+        args.push("--disable-git".to_string());
+    }
+
+    vec![CreationStep {
+        label: "Create Next.js project".to_string(),
+        program: npx_bin(),
+        args,
+        cwd: parent_dir.to_path_buf(),
+    }]
+}
+
+fn cra_steps(use_typescript: bool, project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
+    let mut args = vec![
+        "-y".to_string(),
+        "create-react-app@latest".to_string(),
+        project_name.to_string(),
+    ];
+    if use_typescript {
+        args.push("--template".to_string());
+        args.push("typescript".to_string());
+    }
+
+    vec![CreationStep {
+        label: "Create React App project".to_string(),
+        program: npx_bin(),
+        args,
+        cwd: parent_dir.to_path_buf(),
+    }]
+}
+
+fn angular_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
+    vec![creation_step(
+        "Create Angular project",
+        npx_bin(),
+        vec![
+            "-y",
+            "@angular/cli@latest",
+            "new",
+            project_name,
+            "--directory",
+            project_name,
+            "--defaults",
+            "--interactive=false",
+            "--package-manager",
+            "npm",
+            "--skip-git",
+            "--style",
+            "css",
+            "--routing=false",
+        ],
+        parent_dir,
+    )]
+}
+
+fn creation_steps(
+    template_id: &str,
+    project_name: &str,
+    parent_dir: &Path,
+    target_dir: &Path,
+) -> Result<Vec<CreationStep>, String> {
+    let steps = match template_id {
+        "vite-react-ts" => vite_steps("react-ts", project_name, parent_dir, target_dir),
+        "vite-react-js" => vite_steps("react", project_name, parent_dir, target_dir),
+        "vite-vue-ts" => vite_steps("vue-ts", project_name, parent_dir, target_dir),
+        "vite-vue-js" => vite_steps("vue", project_name, parent_dir, target_dir),
+        "vite-svelte-ts" => vite_steps("svelte-ts", project_name, parent_dir, target_dir),
+        "vite-svelte-js" => vite_steps("svelte", project_name, parent_dir, target_dir),
+        "next-ts-latest" => next_steps("latest", true, project_name, parent_dir),
+        "next-js-latest" => next_steps("latest", false, project_name, parent_dir),
+        "next-ts-16" => next_steps("16", true, project_name, parent_dir),
+        "next-js-16" => next_steps("16", false, project_name, parent_dir),
+        "next-ts-15" => next_steps("15", true, project_name, parent_dir),
+        "next-js-15" => next_steps("15", false, project_name, parent_dir),
+        "next-ts-14" => next_steps("14", true, project_name, parent_dir),
+        "next-js-14" => next_steps("14", false, project_name, parent_dir),
+        "cra-ts" => cra_steps(true, project_name, parent_dir),
+        "cra-js" => cra_steps(false, project_name, parent_dir),
+        "angular-ts-latest" => angular_steps(project_name, parent_dir),
+        _ => return Err(format!("Unknown project template '{}'", template_id)),
+    };
+    Ok(steps)
+}
+
+fn creation_command(step: &CreationStep) -> Command {
+    let parent_pid = std::process::id().to_string();
+
+    #[cfg(unix)]
+    {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(creation_parent_watch_script())
+            .arg("prolaunch-create-step")
+            .arg(parent_pid)
+            .arg(&step.program)
+            .args(&step.args);
+        command
+    }
+
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("powershell.exe");
+        command
+            .arg("-NoLogo")
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-Command")
+            .arg(creation_parent_watch_script())
+            .arg(parent_pid)
+            .arg(&step.program)
+            .args(&step.args);
+        command
+    }
+}
+
+fn join_reader(handle: Option<std::thread::JoinHandle<String>>) -> String {
+    handle
+        .and_then(|thread| thread.join().ok())
+        .unwrap_or_default()
+}
+
+fn command_output_excerpt(stdout: &str, stderr: &str) -> String {
+    let mut output = String::new();
+    if !stdout.trim().is_empty() {
+        output.push_str(stdout.trim());
+    }
+    if !stderr.trim().is_empty() {
+        if !output.is_empty() {
+            output.push_str("\n\n");
+        }
+        output.push_str(stderr.trim());
+    }
+
+    const MAX_LEN: usize = 4000;
+    if output.chars().count() > MAX_LEN {
+        let tail: String = output
+            .chars()
+            .rev()
+            .take(MAX_LEN)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        format!("...{}", tail)
+    } else {
+        output
+    }
+}
+
+fn run_creation_step(state: &AppState, step: &CreationStep) -> Result<(), String> {
+    let mut command = creation_command(step);
+    command
+        .current_dir(&step.cwd)
+        .env("CI", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("{} failed to start: {}", step.label, e))?;
+    let creation_id = state.next_run_id.fetch_add(1, Ordering::Relaxed);
+    let creation_pid = child.id();
+    {
+        let mut processes = state.creation_processes.lock().map_err(|e| e.to_string())?;
+        processes.insert(creation_id, creation_pid);
+    }
+
+    let stdout = child.stdout.take().map(|mut stream| {
+        std::thread::spawn(move || {
+            let mut output = String::new();
+            let _ = stream.read_to_string(&mut output);
+            output
+        })
+    });
+    let stderr = child.stderr.take().map(|mut stream| {
+        std::thread::spawn(move || {
+            let mut output = String::new();
+            let _ = stream.read_to_string(&mut output);
+            output
+        })
+    });
+
+    let started_at = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if started_at.elapsed() > Duration::from_secs(600) {
+                    let _ = kill_process_group(&mut child);
+                    if let Ok(mut processes) = state.creation_processes.lock() {
+                        processes.remove(&creation_id);
+                    }
+                    let stdout = join_reader(stdout);
+                    let stderr = join_reader(stderr);
+                    let output = command_output_excerpt(&stdout, &stderr);
+                    return Err(format!(
+                        "{} timed out after 10 minutes\n{}",
+                        step.label, output
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            Err(e) => {
+                let _ = kill_process_group(&mut child);
+                if let Ok(mut processes) = state.creation_processes.lock() {
+                    processes.remove(&creation_id);
+                }
+                return Err(format!("{} failed while waiting: {}", step.label, e));
+            }
+        }
+    };
+
+    if let Ok(mut processes) = state.creation_processes.lock() {
+        processes.remove(&creation_id);
+    }
+
+    let stdout = join_reader(stdout);
+    let stderr = join_reader(stderr);
+
+    if status.success() {
+        return Ok(());
+    }
+
+    let output = command_output_excerpt(&stdout, &stderr);
+    let code = status
+        .code()
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    Err(format!(
+        "{} failed with exit code {}\n{}",
+        step.label, code, output
+    ))
+}
+
+#[tauri::command]
+fn create_project(
+    state: State<'_, AppState>,
+    template_id: String,
+    parent_dir: String,
+    project_name: String,
+) -> Result<ProjectInfo, String> {
+    validate_project_name(&project_name)?;
+
+    let parent_path = PathBuf::from(&parent_dir);
+    if !parent_path.is_dir() {
+        return Err("Parent folder does not exist".to_string());
+    }
+
+    let target_path = parent_path.join(&project_name);
+    if target_path.exists() {
+        return Err("Target folder already exists".to_string());
+    }
+
+    let steps = creation_steps(&template_id, &project_name, &parent_path, &target_path)?;
+    for step in &steps {
+        run_creation_step(&state, step)?;
+    }
+
+    read_package_json(target_path.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
-    let project_dir = std::path::Path::new(&project_path);
+    let project_dir = Path::new(&project_path);
     let package_path = project_dir.join("package.json");
     let content = std::fs::read_to_string(&package_path)
         .map_err(|e| format!("Failed to read package.json: {}", e))?;
@@ -509,8 +983,7 @@ fn recent_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir)
 }
 
-#[tauri::command]
-fn load_recent_projects(app: AppHandle) -> Vec<String> {
+fn read_recent_projects(app: &AppHandle) -> Vec<String> {
     let path = match recent_path(&app) {
         Ok(p) => p,
         Err(_) => return Vec::new(),
@@ -522,24 +995,39 @@ fn load_recent_projects(app: AppHandle) -> Vec<String> {
     serde_json::from_str(&content).unwrap_or_default()
 }
 
+fn write_recent_projects(app: &AppHandle, list: &[String]) -> Result<(), String> {
+    let path = recent_path(app)?;
+    let content = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_recent_projects(app: AppHandle) -> Vec<String> {
+    read_recent_projects(&app)
+}
+
 #[tauri::command]
 fn save_recent_project(app: AppHandle, project_path: String) -> Result<(), String> {
-    let path = recent_path(&app)?;
-    let mut list: Vec<String> = if path.exists() {
-        let content = std::fs::read_to_string(&path).unwrap_or_default();
-        serde_json::from_str(&content).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
+    let mut list = read_recent_projects(&app);
     list.retain(|p| p != &project_path);
     list.insert(0, project_path);
     if list.len() > 10 {
         list.truncate(10);
     }
 
-    let content = serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?;
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    write_recent_projects(&app, &list)
+}
+
+#[tauri::command]
+fn remove_recent_project(app: AppHandle, project_path: String) -> Result<(), String> {
+    let mut list = read_recent_projects(&app);
+    list.retain(|p| p != &project_path);
+    write_recent_projects(&app, &list)
+}
+
+#[tauri::command]
+fn clear_recent_projects(app: AppHandle) -> Result<(), String> {
+    write_recent_projects(&app, &[])
 }
 
 #[tauri::command]
@@ -626,16 +1114,23 @@ fn list_projects(recent_path: Option<String>) -> Result<Vec<ProjectInfo>, String
 }
 
 fn kill_all_processes(app: &AppHandle) {
-    let children: Vec<Child> = {
+    let (children, creation_pids): (Vec<Child>, Vec<u32>) = {
         let state = app.state::<AppState>();
-        let result = match state.running_processes.lock() {
+        let children = match state.running_processes.lock() {
             Ok(mut procs) => procs.drain().map(|(_, process)| process.child).collect(),
-            Err(_) => return,
+            Err(_) => Vec::new(),
         };
-        result
+        let creation_pids = match state.creation_processes.lock() {
+            Ok(mut procs) => procs.drain().map(|(_, pid)| pid).collect(),
+            Err(_) => Vec::new(),
+        };
+        (children, creation_pids)
     };
     for mut child in children {
         kill_process_group(&mut child).ok();
+    }
+    for pid in creation_pids {
+        kill_process_id(pid).ok();
     }
 }
 
@@ -646,9 +1141,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             running_processes: Mutex::new(HashMap::new()),
+            creation_processes: Mutex::new(HashMap::new()),
             next_run_id: AtomicU64::new(1),
         })
         .invoke_handler(tauri::generate_handler![
+            create_project,
             read_package_json,
             run_script,
             kill_script,
@@ -660,6 +1157,8 @@ pub fn run() {
             save_pins,
             load_recent_projects,
             save_recent_project,
+            remove_recent_project,
+            clear_recent_projects,
             open_in_vscode,
             open_in_terminal,
         ])
