@@ -4,11 +4,12 @@ import type { LogLine } from "../types";
 interface Props {
   logs: LogLine[];
   activeScript: string | null;
+  isRunning: boolean;
   onClear: () => void;
   onReRun: () => void;
 }
 
-function LogViewer({ logs, activeScript, onClear, onReRun }: Props) {
+function LogViewer({ logs, activeScript, isRunning, onClear, onReRun }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -20,7 +21,7 @@ function LogViewer({ logs, activeScript, onClear, onReRun }: Props) {
       <div className="log-header">
         <span className="log-title">Output</span>
         <div className="log-header-actions">
-          {activeScript && (
+          {activeScript && isRunning && (
             <button className="btn-rerun" onClick={onReRun} title="Restart script">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="23 4 23 10 17 10" />

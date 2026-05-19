@@ -281,6 +281,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
         <LogViewer
           logs={runningLogs}
           activeScript={activeLog}
+          isRunning={activeLog ? runningScripts.has(activeLog) : false}
           onClear={() => setLogs([])}
           onReRun={() => {
             const sc = activeLog ? project.scripts.find((s) => s.name === activeLog) : null;
