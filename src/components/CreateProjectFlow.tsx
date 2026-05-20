@@ -16,8 +16,11 @@ import flaskIcon from "../../src-tauri/icons/supports/flask_logo.png";
 import flutterIcon from "../../src-tauri/icons/supports/flutter_logo.png";
 import ginIcon from "../../src-tauri/icons/supports/gin_logo.png";
 import goIcon from "../../src-tauri/icons/supports/go_logo.png";
+import gradleIcon from "../../src-tauri/icons/supports/gradle_logo.png";
+import javaIcon from "../../src-tauri/icons/supports/java_logo.png";
 import javascriptIcon from "../../src-tauri/icons/supports/javascript_logo.png";
 import laravelIcon from "../../src-tauri/icons/supports/laravel_logo.png";
+import mavenIcon from "../../src-tauri/icons/supports/maven_logo.png";
 import nestjsIcon from "../../src-tauri/icons/supports/nestjs_logo.png";
 import nextIcon from "../../src-tauri/icons/supports/nextjs_logo.png";
 import nodeIcon from "../../src-tauri/icons/supports/nodejs_logo.png";
@@ -27,11 +30,12 @@ import pythonIcon from "../../src-tauri/icons/supports/python_logo.png";
 import reactIcon from "../../src-tauri/icons/supports/react_logo.png";
 import slimIcon from "../../src-tauri/icons/supports/slim_logo.png";
 import svelteIcon from "../../src-tauri/icons/supports/svelte_logo.png";
+import springBootIcon from "../../src-tauri/icons/supports/spring_boot_logo.png";
 import symfonyIcon from "../../src-tauri/icons/supports/symfony_logo.png";
 import typescriptIcon from "../../src-tauri/icons/supports/typescript_logo.png";
 import vueIcon from "../../src-tauri/icons/supports/vuejs_logo.png";
 
-type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP" | "Dart" | "Go";
+type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP" | "Dart" | "Go" | "Java";
 type CreateStep = "gallery" | "details" | "creating";
 
 interface TemplateVersion {
@@ -118,8 +122,11 @@ type TemplateIconKey =
   | "flask"
   | "gin"
   | "go"
+  | "gradle"
+  | "java"
   | "javascript"
   | "laravel"
+  | "maven"
   | "nestjs"
   | "next"
   | "node"
@@ -129,6 +136,7 @@ type TemplateIconKey =
   | "react"
   | "slim"
   | "svelte"
+  | "springBoot"
   | "symfony"
   | "typescript"
   | "vue";
@@ -156,8 +164,11 @@ const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
   flask: { label: "Fl", title: "Flask", className: "flask", src: flaskIcon },
   gin: { label: "Gi", title: "Gin", className: "gin", src: ginIcon },
   go: { label: "Go", title: "Go", className: "go", src: goIcon },
+  gradle: { label: "Gr", title: "Gradle", className: "gradle", src: gradleIcon },
+  java: { label: "Ja", title: "Java", className: "java", src: javaIcon },
   javascript: { label: "JS", title: "JavaScript", className: "javascript", src: javascriptIcon },
   laravel: { label: "L", title: "Laravel", className: "laravel", src: laravelIcon },
+  maven: { label: "Mv", title: "Maven", className: "maven", src: mavenIcon },
   nestjs: { label: "Ne", title: "NestJS", className: "nestjs", src: nestjsIcon },
   next: { label: "N", title: "Next.js", className: "next", src: nextIcon },
   node: { label: "N", title: "Node.js", className: "node", src: nodeIcon },
@@ -167,12 +178,73 @@ const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
   react: { label: "R", title: "React", className: "react", src: reactIcon },
   slim: { label: "S", title: "Slim", className: "slim", src: slimIcon },
   svelte: { label: "S", title: "Svelte", className: "svelte", src: svelteIcon },
+  springBoot: { label: "SB", title: "Spring Boot", className: "spring-boot", src: springBootIcon },
   symfony: { label: "Sf", title: "Symfony", className: "symfony", src: symfonyIcon },
   typescript: { label: "TS", title: "TypeScript", className: "typescript", src: typescriptIcon },
   vue: { label: "V", title: "Vue", className: "vue", src: vueIcon },
 };
 
 const PROJECT_TEMPLATES: ProjectTemplate[] = [
+  {
+    cardId: "java-basic",
+    title: "Java",
+    framework: "Java",
+    language: "Java",
+    description: "Minimal Java app with a single Main.java entrypoint.",
+    tags: ["Java", "CLI", "JDK"],
+    versions: [
+      {
+        id: "java-basic-latest",
+        label: "Latest",
+        command: "javac Main.java && java Main",
+      },
+    ],
+  },
+  {
+    cardId: "maven-java",
+    title: "Maven",
+    framework: "Maven",
+    language: "Java",
+    description: "Java application scaffold using Maven and exec plugin.",
+    tags: ["Java", "Maven", "Build"],
+    versions: [
+      {
+        id: "maven-java-latest",
+        label: "Latest",
+        command: "mvn exec:java",
+      },
+    ],
+  },
+  {
+    cardId: "gradle-java",
+    title: "Gradle",
+    framework: "Gradle",
+    language: "Java",
+    description: "Java application scaffold using Gradle application plugin.",
+    tags: ["Java", "Gradle", "Build"],
+    versions: [
+      {
+        id: "gradle-java-latest",
+        label: "Latest",
+        command: "gradle run",
+      },
+    ],
+  },
+  {
+    cardId: "spring-boot-java",
+    title: "Spring Boot",
+    framework: "Spring Boot",
+    language: "Java",
+    description: "Spring Boot web API starter using Maven.",
+    tags: ["Java", "Spring Boot", "API"],
+    versions: [
+      {
+        id: "spring-boot-java-latest",
+        label: "3.5.14",
+        command: "mvn spring-boot:run",
+      },
+    ],
+  },
   {
     cardId: "go-basic",
     title: "Go",
@@ -704,6 +776,10 @@ function projectNameError(projectName: string): string | null {
 }
 
 function templateIconKey(template: ProjectTemplate): TemplateIconKey {
+  if (template.cardId.includes("spring-boot")) return "springBoot";
+  if (template.cardId.includes("maven")) return "maven";
+  if (template.cardId.includes("gradle")) return "gradle";
+  if (template.language === "Java") return "java";
   if (template.cardId.includes("gin")) return "gin";
   if (template.cardId.includes("fiber")) return "fiber";
   if (template.cardId.includes("echo")) return "echo";
@@ -925,7 +1001,7 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         <>
           <div className="template-toolbar">
             <div className="template-tabs">
-              {(["All", "JavaScript", "TypeScript", "Python", "PHP", "Dart", "Go"] as LanguageFilter[]).map((item) => (
+              {(["All", "JavaScript", "TypeScript", "Python", "PHP", "Dart", "Go", "Java"] as LanguageFilter[]).map((item) => (
                 <button
                   key={item}
                   className={`template-tab ${language === item ? "active" : ""}`}

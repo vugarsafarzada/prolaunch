@@ -237,6 +237,24 @@ fn script_invocation(
         return Ok(shell_tool_command(command_line));
     }
 
+    if package_manager == "java" {
+        let project_dir = Path::new(project_path);
+        let command_line = java_script_command_line(project_dir, script_name)?;
+        return Ok(shell_tool_command(command_line));
+    }
+
+    if package_manager == "maven" {
+        let project_dir = Path::new(project_path);
+        let command_line = maven_script_command_line(project_dir, script_name)?;
+        return Ok(shell_tool_command(command_line));
+    }
+
+    if package_manager == "gradle" {
+        let project_dir = Path::new(project_path);
+        let command_line = gradle_script_command_line(project_dir, script_name)?;
+        return Ok(shell_tool_command(command_line));
+    }
+
     Ok(ToolCommand {
         program: package_manager_command(package_manager),
         args: vec![run_command, script_name.to_string()],
@@ -290,6 +308,12 @@ fn preferred_package_manager(path: &std::path::Path) -> String {
         "python".to_string()
     } else if path.join("go.mod").exists() || path.join("main.go").exists() {
         "go".to_string()
+    } else if path.join("pom.xml").exists() {
+        "maven".to_string()
+    } else if path.join("build.gradle").exists() || path.join("build.gradle.kts").exists() {
+        "gradle".to_string()
+    } else if find_java_main_file(path).is_some() {
+        "java".to_string()
     } else if path.join("pubspec.yaml").exists() {
         preferred_pub_package_manager(path)
     } else if path.join("pnpm-lock.yaml").exists() {
@@ -329,9 +353,8 @@ fn preferred_node_package_manager(path: &std::path::Path) -> String {
 fn normalize_package_manager(package_manager: Option<String>, project_path: &str) -> String {
     match package_manager.as_deref() {
         Some("npm") | Some("pnpm") | Some("yarn") | Some("bun") | Some("composer")
-        | Some("python") | Some("dart") | Some("flutter") | Some("go") | Some("custom") => {
-            package_manager.unwrap()
-        }
+        | Some("python") | Some("dart") | Some("flutter") | Some("go") | Some("java")
+        | Some("maven") | Some("gradle") | Some("custom") => package_manager.unwrap(),
         _ => preferred_package_manager(std::path::Path::new(project_path)),
     }
 }
@@ -342,6 +365,9 @@ fn package_manager_command(package_manager: &str) -> String {
             "bun" => "bun".to_string(),
             "composer" => "composer.bat".to_string(),
             "go" => "go.exe".to_string(),
+            "java" => "java.exe".to_string(),
+            "maven" => "mvn.cmd".to_string(),
+            "gradle" => "gradle.bat".to_string(),
             _ => format!("{}.cmd", package_manager),
         };
     }
@@ -393,6 +419,10 @@ enum ToolRequirement {
     Dart,
     Flutter,
     Go,
+    Java,
+    Javac,
+    Maven,
+    Gradle,
 }
 
 fn npm_bin() -> String {
@@ -436,6 +466,38 @@ fn go_bin() -> String {
         "go.exe".to_string()
     } else {
         "go".to_string()
+    }
+}
+
+fn java_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "java.exe".to_string()
+    } else {
+        "java".to_string()
+    }
+}
+
+fn javac_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "javac.exe".to_string()
+    } else {
+        "javac".to_string()
+    }
+}
+
+fn maven_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "mvn.cmd".to_string()
+    } else {
+        "mvn".to_string()
+    }
+}
+
+fn gradle_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "gradle.bat".to_string()
+    } else {
+        "gradle".to_string()
     }
 }
 
@@ -861,6 +923,21 @@ fn template_requirements(template_id: &str) -> Result<Vec<ToolRequirement>, Stri
         "flutter-app-latest" => vec![ToolRequirement::Flutter],
         "go-basic-latest" | "gin-go-latest" | "fiber-go-latest" | "echo-go-latest"
         | "chi-go-latest" => vec![ToolRequirement::Go],
+        "java-basic-latest" => vec![ToolRequirement::Java, ToolRequirement::Javac],
+        "maven-java-latest" | "spring-boot-java-latest" => {
+            vec![
+                ToolRequirement::Java,
+                ToolRequirement::Javac,
+                ToolRequirement::Maven,
+            ]
+        }
+        "gradle-java-latest" => {
+            vec![
+                ToolRequirement::Java,
+                ToolRequirement::Javac,
+                ToolRequirement::Gradle,
+            ]
+        }
         _ => return Err(format!("Unknown project template '{}'", template_id)),
     };
 
@@ -954,6 +1031,46 @@ fn prepare_create_toolchain(
             "Go",
             go_bin(),
             vec!["version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Java) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Java",
+            java_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Javac) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Java compiler",
+            javac_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Maven) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Maven",
+            maven_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Gradle) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Gradle",
+            gradle_bin(),
+            vec!["--version".to_string()],
         )?;
     }
 
@@ -1375,6 +1492,250 @@ fn go_project_steps(
     ));
 
     steps
+}
+
+const SPRING_BOOT_VERSION: &str = "3.5.14";
+
+fn java_basic_steps(project_name: &str, parent_dir: &Path, target_dir: &Path) -> Vec<CreationStep> {
+    vec![write_files_step(
+        "Create Java starter files",
+        vec![
+            (
+                target_dir.join("Main.java"),
+                r#"public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello from Java");
+    }
+}
+"#
+                .to_string(),
+            ),
+            (
+                target_dir.join("README.md"),
+                format!("# {}\n\nCreated with ProLaunch.\n", project_name),
+            ),
+        ],
+        parent_dir,
+        format!("$ ProLaunch scaffold {}", project_name),
+    )]
+}
+
+fn maven_java_main_source() -> &'static str {
+    r#"package com.prolaunch.app;
+
+public class App {
+    public static void main(String[] args) {
+        System.out.println("Hello from Maven Java");
+    }
+}
+"#
+}
+
+fn maven_pom(project_name: &str) -> String {
+    format!(
+        r#"<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.prolaunch</groupId>
+  <artifactId>{}</artifactId>
+  <version>0.1.0</version>
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <configuration>
+          <mainClass>com.prolaunch.app.App</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"#,
+        project_name
+    )
+}
+
+fn maven_java_steps(project_name: &str, parent_dir: &Path, target_dir: &Path) -> Vec<CreationStep> {
+    vec![write_files_step(
+        "Create Maven starter files",
+        vec![
+            (target_dir.join("pom.xml"), maven_pom(project_name)),
+            (
+                target_dir.join("src/main/java/com/prolaunch/app/App.java"),
+                maven_java_main_source().to_string(),
+            ),
+            (
+                target_dir.join("README.md"),
+                format!("# {}\n\nCreated with ProLaunch.\n", project_name),
+            ),
+        ],
+        parent_dir,
+        format!("$ ProLaunch scaffold {}", project_name),
+    )]
+}
+
+fn gradle_build_file() -> &'static str {
+    r#"plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+application {
+    mainClass = 'com.prolaunch.app.App'
+}
+"#
+}
+
+fn gradle_settings(project_name: &str) -> String {
+    format!("rootProject.name = '{}'\n", project_name)
+}
+
+fn gradle_java_steps(
+    project_name: &str,
+    parent_dir: &Path,
+    target_dir: &Path,
+) -> Vec<CreationStep> {
+    vec![write_files_step(
+        "Create Gradle starter files",
+        vec![
+            (
+                target_dir.join("settings.gradle"),
+                gradle_settings(project_name),
+            ),
+            (
+                target_dir.join("build.gradle"),
+                gradle_build_file().to_string(),
+            ),
+            (
+                target_dir.join("src/main/java/com/prolaunch/app/App.java"),
+                maven_java_main_source().to_string(),
+            ),
+            (
+                target_dir.join("README.md"),
+                format!("# {}\n\nCreated with ProLaunch.\n", project_name),
+            ),
+        ],
+        parent_dir,
+        format!("$ ProLaunch scaffold {}", project_name),
+    )]
+}
+
+fn spring_boot_main_source() -> &'static str {
+    r#"package com.prolaunch.app;
+
+import java.util.Map;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@SpringBootApplication
+@RestController
+public class App {
+    public static void main(String[] args) {
+        SpringApplication.run(App.class, args);
+    }
+
+    @GetMapping("/")
+    public Map<String, String> home() {
+        return Map.of("message", "Hello from Spring Boot");
+    }
+}
+"#
+}
+
+fn spring_boot_pom(project_name: &str) -> String {
+    format!(
+        r#"<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>{}</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.prolaunch</groupId>
+  <artifactId>{}</artifactId>
+  <version>0.1.0</version>
+
+  <properties>
+    <java.version>17</java.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"#,
+        SPRING_BOOT_VERSION, project_name
+    )
+}
+
+fn spring_boot_steps(
+    project_name: &str,
+    parent_dir: &Path,
+    target_dir: &Path,
+) -> Vec<CreationStep> {
+    vec![
+        write_files_step(
+            "Create Spring Boot starter files",
+            vec![
+                (target_dir.join("pom.xml"), spring_boot_pom(project_name)),
+                (
+                    target_dir.join("src/main/java/com/prolaunch/app/App.java"),
+                    spring_boot_main_source().to_string(),
+                ),
+                (
+                    target_dir.join("README.md"),
+                    format!("# {}\n\nCreated with ProLaunch.\n", project_name),
+                ),
+            ],
+            parent_dir,
+            format!("$ ProLaunch scaffold {}", project_name),
+        ),
+        creation_step(
+            "Install Spring Boot dependencies",
+            maven_bin(),
+            vec!["-q", "dependency:resolve"],
+            target_dir,
+        ),
+    ]
 }
 
 fn node_backend_scaffold_script() -> &'static str {
@@ -1880,6 +2241,10 @@ fn creation_steps(
         ),
         "dart-console-latest" => dart_console_steps(project_name, parent_dir),
         "flutter-app-latest" => flutter_app_steps(project_name, parent_dir),
+        "java-basic-latest" => java_basic_steps(project_name, parent_dir, target_dir),
+        "maven-java-latest" => maven_java_steps(project_name, parent_dir, target_dir),
+        "gradle-java-latest" => gradle_java_steps(project_name, parent_dir, target_dir),
+        "spring-boot-java-latest" => spring_boot_steps(project_name, parent_dir, target_dir),
         "go-basic-latest" => go_project_steps("basic", project_name, parent_dir, target_dir),
         "gin-go-latest" => go_project_steps("gin", project_name, parent_dir, target_dir),
         "fiber-go-latest" => go_project_steps("fiber", project_name, parent_dir, target_dir),
@@ -2285,6 +2650,9 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
     let pubspec_path = project_dir.join("pubspec.yaml");
     let go_mod_path = project_dir.join("go.mod");
     let main_go_path = project_dir.join("main.go");
+    let pom_path = project_dir.join("pom.xml");
+    let gradle_path = project_dir.join("build.gradle");
+    let gradle_kts_path = project_dir.join("build.gradle.kts");
 
     let mut scripts = Vec::new();
 
@@ -2322,6 +2690,23 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
         }
     }
 
+    if pom_path.exists() {
+        if let Ok(project) = read_maven_project(project_path.clone(), &project_dir, &pom_path) {
+            scripts.extend(project.scripts);
+        }
+    }
+
+    if gradle_path.exists() || gradle_kts_path.exists() {
+        let build_path = if gradle_path.exists() {
+            &gradle_path
+        } else {
+            &gradle_kts_path
+        };
+        if let Ok(project) = read_gradle_project(project_path.clone(), &project_dir, build_path) {
+            scripts.extend(project.scripts);
+        }
+    }
+
     if main_py_path.exists()
         && !scripts.iter().any(|script: &ScriptInfo| {
             script.package_manager.as_deref() == Some("python") && script.name == "start"
@@ -2336,6 +2721,14 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
         })
     {
         scripts.extend(go_main_scripts(&project_dir));
+    }
+
+    if let Some(main_file) = find_java_main_file(&project_dir) {
+        if !scripts.iter().any(|script: &ScriptInfo| {
+            script.package_manager.as_deref() == Some("java") && script.name == "start"
+        }) {
+            scripts.extend(java_main_scripts(&main_file));
+        }
     }
 
     Ok(ProjectInfo {
@@ -2696,6 +3089,275 @@ fn read_go_project(
     })
 }
 
+fn find_java_main_file(project_dir: &Path) -> Option<PathBuf> {
+    let main_path = project_dir.join("Main.java");
+    if main_path.exists() {
+        return Some(main_path);
+    }
+
+    let entries = std::fs::read_dir(project_dir).ok()?;
+    entries.filter_map(Result::ok).find_map(|entry| {
+        let path = entry.path();
+        let is_java_file = path.extension().and_then(|ext| ext.to_str()) == Some("java");
+        if !is_java_file {
+            return None;
+        }
+
+        std::fs::read_to_string(&path)
+            .ok()
+            .filter(|content| content.contains("static void main"))
+            .map(|_| path)
+    })
+}
+
+fn java_main_class(main_file: &Path) -> String {
+    main_file
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Main")
+        .to_string()
+}
+
+fn java_main_command(main_file: &Path) -> String {
+    let file_name = main_file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Main.java")
+        .to_string();
+    let class_name = java_main_class(main_file);
+    format!("javac {} && java {}", file_name, class_name)
+}
+
+fn java_main_command_line(main_file: &Path) -> String {
+    let file_name = main_file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Main.java")
+        .to_string();
+    let class_name = java_main_class(main_file);
+    format!(
+        "{} {} && {} {}",
+        shell_quote(&javac_bin()),
+        shell_quote(&file_name),
+        shell_quote(&java_bin()),
+        shell_quote(&class_name)
+    )
+}
+
+fn java_main_scripts(main_file: &Path) -> Vec<ScriptInfo> {
+    let source = main_file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Main.java")
+        .to_string();
+    let command = java_main_command(main_file);
+
+    vec![ScriptInfo {
+        name: "start".to_string(),
+        command,
+        package_manager: Some("java".to_string()),
+        source: Some(source),
+    }]
+}
+
+fn xml_first_text(content: &str, tag: &str) -> Option<String> {
+    let start = format!("<{}>", tag);
+    let end = format!("</{}>", tag);
+    content.find(&start).and_then(|start_index| {
+        let value_start = start_index + start.len();
+        content[value_start..].find(&end).map(|end_index| {
+            content[value_start..value_start + end_index]
+                .trim()
+                .to_string()
+        })
+    })
+}
+
+fn maven_project_name(project_dir: &Path, content: &str) -> String {
+    let project_section = content
+        .find("</parent>")
+        .map(|index| &content[index + "</parent>".len()..])
+        .unwrap_or(content);
+
+    xml_first_text(project_section, "artifactId")
+        .unwrap_or_else(|| python_folder_project_name(project_dir))
+}
+
+fn maven_command(project_dir: &Path) -> ToolCommand {
+    let wrapper = if cfg!(target_os = "windows") {
+        project_dir.join("mvnw.cmd")
+    } else {
+        project_dir.join("mvnw")
+    };
+
+    if wrapper.exists() {
+        ToolCommand {
+            program: wrapper.to_string_lossy().to_string(),
+            args: Vec::new(),
+        }
+    } else {
+        ToolCommand {
+            program: maven_bin(),
+            args: Vec::new(),
+        }
+    }
+}
+
+fn gradle_command(project_dir: &Path) -> ToolCommand {
+    let wrapper = if cfg!(target_os = "windows") {
+        project_dir.join("gradlew.bat")
+    } else {
+        project_dir.join("gradlew")
+    };
+
+    if wrapper.exists() {
+        ToolCommand {
+            program: wrapper.to_string_lossy().to_string(),
+            args: Vec::new(),
+        }
+    } else {
+        ToolCommand {
+            program: gradle_bin(),
+            args: Vec::new(),
+        }
+    }
+}
+
+fn command_display(tool: &ToolCommand) -> String {
+    Path::new(&tool.program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| tool.program.clone())
+}
+
+fn maven_script_args(content: &str, script_name: &str) -> Option<Vec<&'static str>> {
+    let is_spring = content.contains("spring-boot-maven-plugin")
+        || content.contains("spring-boot-starter")
+        || content.contains("spring-boot");
+    let has_exec = content.contains("exec-maven-plugin");
+
+    match script_name {
+        "dev" | "start" if is_spring => Some(vec!["spring-boot:run"]),
+        "dev" | "start" if has_exec => Some(vec!["exec:java"]),
+        "test" => Some(vec!["test"]),
+        "package" => Some(vec!["package"]),
+        "clean" => Some(vec!["clean"]),
+        _ => None,
+    }
+}
+
+fn maven_scripts(project_dir: &Path, content: &str) -> Vec<ScriptInfo> {
+    let tool = maven_command(project_dir);
+    let display = command_display(&tool);
+    let names = ["dev", "start", "test", "package", "clean"];
+
+    names
+        .into_iter()
+        .filter_map(|name| {
+            maven_script_args(content, name).map(|args| ScriptInfo {
+                name: name.to_string(),
+                command: format!("{} {}", display, args.join(" ")),
+                package_manager: Some("maven".to_string()),
+                source: Some("pom.xml".to_string()),
+            })
+        })
+        .collect()
+}
+
+fn read_maven_project(
+    project_path: String,
+    project_dir: &Path,
+    pom_path: &Path,
+) -> Result<ProjectInfo, String> {
+    let content =
+        std::fs::read_to_string(pom_path).map_err(|e| format!("Failed to read pom.xml: {}", e))?;
+    let name = maven_project_name(project_dir, &content);
+
+    Ok(ProjectInfo {
+        name,
+        path: project_path,
+        scripts: maven_scripts(project_dir, &content),
+        package_manager: "maven".to_string(),
+    })
+}
+
+fn gradle_project_name(project_dir: &Path) -> String {
+    let settings_path = if project_dir.join("settings.gradle").exists() {
+        project_dir.join("settings.gradle")
+    } else {
+        project_dir.join("settings.gradle.kts")
+    };
+
+    std::fs::read_to_string(settings_path)
+        .ok()
+        .and_then(|content| {
+            content.lines().find_map(|line| {
+                let trimmed = line.trim();
+                trimmed
+                    .strip_prefix("rootProject.name")
+                    .and_then(|rest| rest.split_once('='))
+                    .map(|(_, value)| value.trim().trim_matches(['"', '\'']).to_string())
+            })
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| python_folder_project_name(project_dir))
+}
+
+fn gradle_script_args(content: &str, script_name: &str) -> Option<Vec<&'static str>> {
+    let is_spring = content.contains("org.springframework.boot")
+        || content.contains("spring-boot-starter")
+        || content.contains("bootRun");
+    let has_application = content.contains("application") || content.contains("mainClass");
+
+    match script_name {
+        "dev" | "start" if is_spring => Some(vec!["bootRun"]),
+        "dev" | "start" if has_application => Some(vec!["run"]),
+        "test" => Some(vec!["test"]),
+        "build" => Some(vec!["build"]),
+        "clean" => Some(vec!["clean"]),
+        _ => None,
+    }
+}
+
+fn gradle_scripts(project_dir: &Path, content: &str, source: &str) -> Vec<ScriptInfo> {
+    let tool = gradle_command(project_dir);
+    let display = command_display(&tool);
+    let names = ["dev", "start", "test", "build", "clean"];
+
+    names
+        .into_iter()
+        .filter_map(|name| {
+            gradle_script_args(content, name).map(|args| ScriptInfo {
+                name: name.to_string(),
+                command: format!("{} {}", display, args.join(" ")),
+                package_manager: Some("gradle".to_string()),
+                source: Some(source.to_string()),
+            })
+        })
+        .collect()
+}
+
+fn read_gradle_project(
+    project_path: String,
+    project_dir: &Path,
+    build_path: &Path,
+) -> Result<ProjectInfo, String> {
+    let content = std::fs::read_to_string(build_path)
+        .map_err(|e| format!("Failed to read Gradle build file: {}", e))?;
+    let source = build_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("build.gradle");
+
+    Ok(ProjectInfo {
+        name: gradle_project_name(project_dir),
+        path: project_path,
+        scripts: gradle_scripts(project_dir, &content, source),
+        package_manager: "gradle".to_string(),
+    })
+}
+
 fn pub_script_command_line(
     project_dir: &Path,
     package_manager: &str,
@@ -2739,6 +3401,46 @@ fn go_script_command_line(project_dir: &Path, script_name: &str) -> Result<Strin
         .find(|script| script.name == script_name)
         .map(|script| script.command)
         .ok_or_else(|| format!("Go script '{}' was not found", script_name))
+}
+
+fn java_script_command_line(project_dir: &Path, script_name: &str) -> Result<String, String> {
+    if script_name != "start" {
+        return Err(format!("Java script '{}' was not found", script_name));
+    }
+
+    let main_file = find_java_main_file(project_dir)
+        .ok_or_else(|| "Java main file was not found".to_string())?;
+    Ok(java_main_command_line(&main_file))
+}
+
+fn maven_script_command_line(project_dir: &Path, script_name: &str) -> Result<String, String> {
+    let pom_path = project_dir.join("pom.xml");
+    let content =
+        std::fs::read_to_string(&pom_path).map_err(|e| format!("Failed to read pom.xml: {}", e))?;
+    let args = maven_script_args(&content, script_name)
+        .ok_or_else(|| format!("Maven script '{}' was not found", script_name))?;
+    let tool = maven_command(project_dir);
+    Ok(tool_command_line(
+        &tool,
+        &args.into_iter().map(str::to_string).collect::<Vec<_>>(),
+    ))
+}
+
+fn gradle_script_command_line(project_dir: &Path, script_name: &str) -> Result<String, String> {
+    let build_path = if project_dir.join("build.gradle").exists() {
+        project_dir.join("build.gradle")
+    } else {
+        project_dir.join("build.gradle.kts")
+    };
+    let content = std::fs::read_to_string(&build_path)
+        .map_err(|e| format!("Failed to read Gradle build file: {}", e))?;
+    let args = gradle_script_args(&content, script_name)
+        .ok_or_else(|| format!("Gradle script '{}' was not found", script_name))?;
+    let tool = gradle_command(project_dir);
+    Ok(tool_command_line(
+        &tool,
+        &args.into_iter().map(str::to_string).collect::<Vec<_>>(),
+    ))
 }
 
 fn python_script_command(project_dir: &Path, script_name: &str) -> Result<String, String> {
