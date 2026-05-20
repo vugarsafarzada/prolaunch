@@ -251,7 +251,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
         </div>
         <div className="scripts-list">
           {project.scripts.length === 0 ? (
-            <div className="no-scripts">No scripts found in package.json</div>
+            <div className="no-scripts">No scripts found in project manifest</div>
           ) : (
             [...project.scripts]
               .filter(

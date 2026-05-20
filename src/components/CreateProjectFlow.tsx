@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectInfo } from "../types";
 
-type LanguageFilter = "All" | "JavaScript" | "TypeScript";
+type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "PHP";
 type CreateStep = "gallery" | "details" | "creating";
 
 interface TemplateVersion {
@@ -221,6 +221,66 @@ const PROJECT_TEMPLATES: ProjectTemplate[] = [
     ],
   },
   {
+    cardId: "laravel-php",
+    title: "Laravel",
+    framework: "Laravel",
+    language: "PHP",
+    description: "Full-stack PHP framework with Composer scripts.",
+    tags: ["PHP", "Composer", "MVC"],
+    versions: [
+      {
+        id: "laravel-php-latest",
+        label: "Latest",
+        command: "composer create-project --no-interaction --no-progress laravel/laravel my-app",
+      },
+    ],
+  },
+  {
+    cardId: "symfony-php",
+    title: "Symfony",
+    framework: "Symfony",
+    language: "PHP",
+    description: "Symfony skeleton for modular PHP applications.",
+    tags: ["PHP", "Composer", "Skeleton"],
+    versions: [
+      {
+        id: "symfony-php-latest",
+        label: "Latest",
+        command: "composer create-project --no-interaction --no-progress symfony/skeleton my-app",
+      },
+    ],
+  },
+  {
+    cardId: "slim-php",
+    title: "Slim",
+    framework: "Slim",
+    language: "PHP",
+    description: "Small PHP framework for APIs and lightweight apps.",
+    tags: ["PHP", "Composer", "API"],
+    versions: [
+      {
+        id: "slim-php-latest",
+        label: "Latest",
+        command: "composer create-project --no-interaction --no-progress slim/slim-skeleton my-app",
+      },
+    ],
+  },
+  {
+    cardId: "codeigniter-php",
+    title: "CodeIgniter",
+    framework: "CodeIgniter",
+    language: "PHP",
+    description: "CodeIgniter 4 app starter generated with Composer.",
+    tags: ["PHP", "Composer", "MVC"],
+    versions: [
+      {
+        id: "codeigniter-php-latest",
+        label: "Latest",
+        command: "composer create-project --no-interaction --no-progress codeigniter4/appstarter my-app",
+      },
+    ],
+  },
+  {
     cardId: "angular-ts",
     title: "Angular",
     framework: "Angular",
@@ -420,7 +480,9 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
               ? "Choose a starter"
               : step === "details"
                 ? "Configure project"
-                : "Installing project"}
+                : isCreating
+                  ? "Installing project"
+                  : "Create failed"}
           </span>
         </div>
       </div>
@@ -429,7 +491,7 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         <>
           <div className="template-toolbar">
             <div className="template-tabs">
-              {(["All", "JavaScript", "TypeScript"] as LanguageFilter[]).map((item) => (
+              {(["All", "JavaScript", "TypeScript", "PHP"] as LanguageFilter[]).map((item) => (
                 <button
                   key={item}
                   className={`template-tab ${language === item ? "active" : ""}`}
@@ -582,8 +644,17 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         </div>
       ) : (
         <div className="create-progress">
-          <div className="create-progress-hero">
-            <div className="create-spinner" />
+          <div className={`create-progress-hero ${isCreating ? "" : "failed"}`}>
+            {isCreating ? (
+              <div className="create-spinner" />
+            ) : (
+              <div className="create-status-icon error" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </div>
+            )}
             <div>
               <strong>{isCreating ? `Creating ${projectName}` : "Create failed"}</strong>
               <span>
