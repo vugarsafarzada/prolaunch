@@ -1029,8 +1029,32 @@ body {
   white-space: pre-wrap;
 }
 
+.create-log-line.warning {
+  background: rgba(144, 146, 150, 0.06);
+}
+
+.create-log-line.warning code {
+  color: var(--text-secondary);
+}
+
+.create-log-line.error {
+  background: rgba(255, 107, 107, 0.04);
+  border-left: 2px solid rgba(255, 107, 107, 0.35);
+  padding-left: 8px;
+}
+
 .create-log-line.error code {
-  color: var(--danger);
+  color: #ff8787;
+}
+
+.create-log-line.success {
+  background: rgba(81, 207, 102, 0.04);
+  border-left: 2px solid rgba(81, 207, 102, 0.32);
+  padding-left: 8px;
+}
+
+.create-log-line.success code {
+  color: #b2f2bb;
 }
 
 @keyframes spin {
