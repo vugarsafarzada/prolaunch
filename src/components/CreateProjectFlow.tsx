@@ -3,6 +3,26 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectInfo } from "../types";
+import angularIcon from "../../src-tauri/icons/supports/angular.png";
+import codeigniterIcon from "../../src-tauri/icons/supports/codeIgniter.png";
+import djangoIcon from "../../src-tauri/icons/supports/django.png";
+import expressIcon from "../../src-tauri/icons/supports/express.png";
+import fastapiIcon from "../../src-tauri/icons/supports/fastapi.png";
+import flaskIcon from "../../src-tauri/icons/supports/flask.png";
+import javascriptIcon from "../../src-tauri/icons/supports/javascript.png";
+import laravelIcon from "../../src-tauri/icons/supports/laravel.png";
+import nestjsIcon from "../../src-tauri/icons/supports/nestjs.png";
+import nextIcon from "../../src-tauri/icons/supports/nextjs.png";
+import nodeIcon from "../../src-tauri/icons/supports/nodejs.png";
+import nuxtIcon from "../../src-tauri/icons/supports/nuxtjs.png";
+import phpIcon from "../../src-tauri/icons/supports/php.png";
+import pythonIcon from "../../src-tauri/icons/supports/python.png";
+import reactIcon from "../../src-tauri/icons/supports/react.png";
+import slimIcon from "../../src-tauri/icons/supports/slim.png";
+import svelteIcon from "../../src-tauri/icons/supports/svelte.png";
+import symfonyIcon from "../../src-tauri/icons/supports/symfony.png";
+import typescriptIcon from "../../src-tauri/icons/supports/typescript.png";
+import vueIcon from "../../src-tauri/icons/supports/vuejs.png";
 
 type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP";
 type CreateStep = "gallery" | "details" | "creating";
@@ -39,7 +59,59 @@ interface CreateLogLine {
   isError: boolean;
 }
 
+type TemplateIconKey =
+  | "angular"
+  | "codeigniter"
+  | "django"
+  | "express"
+  | "fastapi"
+  | "flask"
+  | "javascript"
+  | "laravel"
+  | "nestjs"
+  | "next"
+  | "node"
+  | "nuxt"
+  | "php"
+  | "python"
+  | "react"
+  | "slim"
+  | "svelte"
+  | "symfony"
+  | "typescript"
+  | "vue";
+
+interface TemplateIconMeta {
+  label: string;
+  title: string;
+  className: string;
+  src?: string;
+}
+
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
+const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
+  angular: { label: "A", title: "Angular", className: "angular", src: angularIcon },
+  codeigniter: { label: "CI", title: "CodeIgniter", className: "codeigniter", src: codeigniterIcon },
+  django: { label: "Dj", title: "Django", className: "django", src: djangoIcon },
+  express: { label: "Ex", title: "Express", className: "express", src: expressIcon },
+  fastapi: { label: "FA", title: "FastAPI", className: "fastapi", src: fastapiIcon },
+  flask: { label: "Fl", title: "Flask", className: "flask", src: flaskIcon },
+  javascript: { label: "JS", title: "JavaScript", className: "javascript", src: javascriptIcon },
+  laravel: { label: "L", title: "Laravel", className: "laravel", src: laravelIcon },
+  nestjs: { label: "Ne", title: "NestJS", className: "nestjs", src: nestjsIcon },
+  next: { label: "N", title: "Next.js", className: "next", src: nextIcon },
+  node: { label: "N", title: "Node.js", className: "node", src: nodeIcon },
+  nuxt: { label: "N", title: "Nuxt", className: "nuxt", src: nuxtIcon },
+  php: { label: "PHP", title: "PHP", className: "php", src: phpIcon },
+  python: { label: "Py", title: "Python", className: "python", src: pythonIcon },
+  react: { label: "R", title: "React", className: "react", src: reactIcon },
+  slim: { label: "S", title: "Slim", className: "slim", src: slimIcon },
+  svelte: { label: "S", title: "Svelte", className: "svelte", src: svelteIcon },
+  symfony: { label: "Sf", title: "Symfony", className: "symfony", src: symfonyIcon },
+  typescript: { label: "TS", title: "TypeScript", className: "typescript", src: typescriptIcon },
+  vue: { label: "V", title: "Vue", className: "vue", src: vueIcon },
+};
 
 const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
@@ -467,6 +539,47 @@ function projectNameError(projectName: string): string | null {
   return null;
 }
 
+function templateIconKey(template: ProjectTemplate): TemplateIconKey {
+  if (template.cardId.includes("fastapi")) return "fastapi";
+  if (template.cardId.includes("flask")) return "flask";
+  if (template.cardId.includes("django")) return "django";
+  if (template.cardId.includes("node")) return "node";
+  if (template.cardId.includes("express")) return "express";
+  if (template.cardId.includes("nestjs")) return "nestjs";
+  if (template.cardId.includes("react") || template.cardId.includes("cra")) return "react";
+  if (template.cardId.includes("next")) return "next";
+  if (template.cardId.includes("vue")) return "vue";
+  if (template.cardId.includes("nuxt")) return "nuxt";
+  if (template.cardId.includes("svelte")) return "svelte";
+  if (template.cardId.includes("laravel")) return "laravel";
+  if (template.cardId.includes("symfony")) return "symfony";
+  if (template.cardId.includes("slim")) return "slim";
+  if (template.cardId.includes("codeigniter")) return "codeigniter";
+  if (template.cardId.includes("angular")) return "angular";
+  if (template.language === "Python") return "python";
+  if (template.language === "PHP") return "php";
+  if (template.language === "TypeScript") return "typescript";
+  return "javascript";
+}
+
+function TemplateIcon({ template, size = "md" }: { template: ProjectTemplate; size?: "sm" | "md" }) {
+  const icon = TEMPLATE_ICONS[templateIconKey(template)];
+
+  return (
+    <div
+      className={`template-icon ${icon.className} ${icon.src ? "asset" : ""} ${size === "sm" ? "small" : ""}`}
+      title={icon.title}
+      aria-label={icon.title}
+    >
+      {icon.src ? (
+        <img src={icon.src} alt="" aria-hidden="true" />
+      ) : (
+        <span>{icon.label}</span>
+      )}
+    </div>
+  );
+}
+
 function waitForNextPaint(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -687,9 +800,12 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
                   tabIndex={0}
                 >
                   <div className="template-card-header">
-                    <div>
-                      <h3>{template.title}</h3>
-                      <span>{template.language}</span>
+                    <div className="template-title-group">
+                      <TemplateIcon template={template} />
+                      <div>
+                        <h3>{template.title}</h3>
+                        <span>{template.language}</span>
+                      </div>
                     </div>
                     <span className="template-framework">{template.framework}</span>
                   </div>
@@ -739,7 +855,10 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         <div className="create-details">
           <div className="selected-template-summary">
             <span className="summary-label">Selected</span>
-            <strong>{selectedTemplate.title}</strong>
+            <div className="summary-title-row">
+              <TemplateIcon template={selectedTemplate} size="sm" />
+              <strong>{selectedTemplate.title}</strong>
+            </div>
             <span>{selectedTemplate.language} / {selectedVersion.label}</span>
             <code>{selectedVersion.command}</code>
           </div>
@@ -817,7 +936,10 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
 
           <div className="selected-template-summary">
             <span className="summary-label">Selected</span>
-            <strong>{selectedTemplate.title}</strong>
+            <div className="summary-title-row">
+              <TemplateIcon template={selectedTemplate} size="sm" />
+              <strong>{selectedTemplate.title}</strong>
+            </div>
             <span>{selectedTemplate.language} / {selectedVersion.label}</span>
             <code>{selectedVersion.command}</code>
           </div>
