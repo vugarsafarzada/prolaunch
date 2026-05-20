@@ -54,6 +54,7 @@ export type TemplateIconKey =
   | "python"
   | "rails"
   | "react"
+  | "reactNative"
   | "ruby"
   | "sinatra"
   | "slim"

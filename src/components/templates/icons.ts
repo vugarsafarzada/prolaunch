@@ -63,6 +63,7 @@ export const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
   python: { label: "Py", title: "Python", className: "python", src: pythonIcon },
   rails: { label: "Ra", title: "Rails", className: "rails", src: railsIcon },
   react: { label: "R", title: "React", className: "react", src: reactIcon },
+  reactNative: { label: "RN", title: "React Native", className: "react-native", src: reactIcon },
   ruby: { label: "Rb", title: "Ruby", className: "ruby", src: rubyIcon },
   sinatra: { label: "Si", title: "Sinatra", className: "sinatra", src: sinatraIcon },
   slim: { label: "S", title: "Slim", className: "slim", src: slimIcon },
@@ -94,6 +95,7 @@ export function templateIconKey(template: ProjectTemplate): TemplateIconKey {
   if (template.cardId.includes("node")) return "node";
   if (template.cardId.includes("express")) return "express";
   if (template.cardId.includes("nestjs")) return "nestjs";
+  if (template.cardId.includes("react-native")) return "reactNative";
   if (template.cardId.includes("react") || template.cardId.includes("cra")) return "react";
   if (template.cardId.includes("next")) return "next";
   if (template.cardId.includes("vue")) return "vue";

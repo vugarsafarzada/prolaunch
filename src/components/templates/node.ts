@@ -286,4 +286,34 @@ export const nodeTemplates: ProjectTemplate[] = [
       },
     ],
   },
+  {
+    cardId: "react-native-ts",
+    title: "React Native",
+    framework: "React Native",
+    language: "TypeScript",
+    description: "Cross-platform React Native app scaffolded with Expo.",
+    tags: ["React Native", "Expo", "Mobile"],
+    versions: [
+      {
+        id: "react-native-ts",
+        label: "Latest",
+        command: "npx create-expo-app@latest my-app --template blank-typescript",
+      },
+    ],
+  },
+  {
+    cardId: "react-native-js",
+    title: "React Native",
+    framework: "React Native",
+    language: "JavaScript",
+    description: "Cross-platform React Native app scaffolded with Expo.",
+    tags: ["React Native", "Expo", "Mobile"],
+    versions: [
+      {
+        id: "react-native-js",
+        label: "Latest",
+        command: "npx create-expo-app@latest my-app --template blank",
+      },
+    ],
+  },
 ];

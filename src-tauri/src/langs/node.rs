@@ -369,6 +369,31 @@ pub(crate) fn nest_steps(
     )]
 }
 
+pub(crate) fn react_native_steps(
+    use_typescript: bool,
+    project_name: &str,
+    parent_dir: &Path,
+) -> Vec<CreationStep> {
+    let template = if use_typescript {
+        "blank-typescript"
+    } else {
+        "blank"
+    };
+
+    vec![creation_step(
+        "Create React Native project",
+        npx_bin(),
+        vec![
+            "-y",
+            "create-expo-app@latest",
+            project_name,
+            "--template",
+            template,
+        ],
+        parent_dir,
+    )]
+}
+
 pub(crate) fn read_node_project(
     project_path: String,
     project_dir: &Path,

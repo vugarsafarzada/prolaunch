@@ -207,7 +207,7 @@ fn template_requirements(template_id: &str) -> Result<Vec<ToolRequirement>, Stri
         | "vite-svelte-ts" | "vite-svelte-js" | "next-ts-latest" | "next-js-latest"
         | "next-ts-16" | "next-js-16" | "next-ts-15" | "next-js-15" | "next-ts-14"
         | "next-js-14" | "cra-ts" | "cra-js" | "angular-ts-latest" | "nestjs-ts-latest"
-        | "nestjs-js-latest" => vec![
+        | "nestjs-js-latest" | "react-native-ts" | "react-native-js" => vec![
             ToolRequirement::Node,
             ToolRequirement::Npm,
             ToolRequirement::Npx,
@@ -507,6 +507,8 @@ fn creation_steps(
         "cra-js" => cra_steps(false, project_name, parent_dir),
         "nestjs-ts-latest" => nest_steps(true, project_name, parent_dir),
         "nestjs-js-latest" => nest_steps(false, project_name, parent_dir),
+        "react-native-ts" => react_native_steps(true, project_name, parent_dir),
+        "react-native-js" => react_native_steps(false, project_name, parent_dir),
         "angular-ts-latest" => angular_steps(project_name, parent_dir),
         _ => return Err(format!("Unknown project template '{}'", template_id)),
     };

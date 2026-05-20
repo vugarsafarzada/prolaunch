@@ -721,6 +721,10 @@ body {
   background: #087ea4;
 }
 
+.template-icon.react-native {
+  background: #20232a;
+}
+
 .template-icon.slim {
   background: #6f7a85;
 }
