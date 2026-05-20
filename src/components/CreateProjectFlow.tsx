@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectInfo } from "../types";
 
-type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "PHP";
+type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP";
 type CreateStep = "gallery" | "details" | "creating";
 
 interface TemplateVersion {
@@ -42,6 +42,156 @@ interface CreateLogLine {
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 const PROJECT_TEMPLATES: ProjectTemplate[] = [
+  {
+    cardId: "python-basic",
+    title: "Python",
+    framework: "Python",
+    language: "Python",
+    description: "Minimal Python app with a local virtual environment.",
+    tags: ["Python", "CLI", "venv"],
+    versions: [
+      {
+        id: "python-basic",
+        label: "Latest",
+        command: "python -m venv .venv && python main.py",
+      },
+    ],
+  },
+  {
+    cardId: "fastapi-python",
+    title: "FastAPI",
+    framework: "FastAPI",
+    language: "Python",
+    description: "Python API starter with FastAPI and Uvicorn.",
+    tags: ["Python", "FastAPI", "API"],
+    versions: [
+      {
+        id: "fastapi-python-latest",
+        label: "Latest",
+        command: "python -m venv .venv && pip install fastapi uvicorn[standard]",
+      },
+    ],
+  },
+  {
+    cardId: "flask-python",
+    title: "Flask",
+    framework: "Flask",
+    language: "Python",
+    description: "Lightweight Flask web app starter.",
+    tags: ["Python", "Flask", "Web"],
+    versions: [
+      {
+        id: "flask-python-latest",
+        label: "Latest",
+        command: "python -m venv .venv && pip install flask",
+      },
+    ],
+  },
+  {
+    cardId: "django-python",
+    title: "Django",
+    framework: "Django",
+    language: "Python",
+    description: "Django web app starter with runserver scripts.",
+    tags: ["Python", "Django", "MVC"],
+    versions: [
+      {
+        id: "django-python-latest",
+        label: "Latest",
+        command: "python -m venv .venv && pip install django>=4.2,<5.0",
+      },
+    ],
+  },
+  {
+    cardId: "node-ts",
+    title: "Node.js",
+    framework: "Node.js",
+    language: "TypeScript",
+    description: "Minimal Node.js HTTP server with TypeScript.",
+    tags: ["Node", "Backend", "HTTP"],
+    versions: [
+      {
+        id: "node-ts",
+        label: "Latest",
+        command: "node <scaffold> my-app && npm install -D typescript tsx @types/node",
+      },
+    ],
+  },
+  {
+    cardId: "node-js",
+    title: "Node.js",
+    framework: "Node.js",
+    language: "JavaScript",
+    description: "Minimal Node.js HTTP server starter.",
+    tags: ["Node", "Backend", "HTTP"],
+    versions: [
+      {
+        id: "node-js",
+        label: "Latest",
+        command: "node <scaffold> my-app && npm install",
+      },
+    ],
+  },
+  {
+    cardId: "express-ts",
+    title: "Express.js",
+    framework: "Express",
+    language: "TypeScript",
+    description: "Express API starter with TypeScript tooling.",
+    tags: ["Node", "Express", "API"],
+    versions: [
+      {
+        id: "express-ts",
+        label: "Latest",
+        command: "node <scaffold> my-app && npm install express && npm install -D typescript tsx @types/node @types/express",
+      },
+    ],
+  },
+  {
+    cardId: "express-js",
+    title: "Express.js",
+    framework: "Express",
+    language: "JavaScript",
+    description: "Express API starter for Node.js.",
+    tags: ["Node", "Express", "API"],
+    versions: [
+      {
+        id: "express-js",
+        label: "Latest",
+        command: "node <scaffold> my-app && npm install express",
+      },
+    ],
+  },
+  {
+    cardId: "nestjs-ts",
+    title: "NestJS",
+    framework: "NestJS",
+    language: "TypeScript",
+    description: "Structured NestJS backend generated with the Nest CLI.",
+    tags: ["Node", "NestJS", "API"],
+    versions: [
+      {
+        id: "nestjs-ts-latest",
+        label: "Latest",
+        command: "npx @nestjs/cli@latest new my-app --package-manager npm --skip-git --language TS --strict",
+      },
+    ],
+  },
+  {
+    cardId: "nestjs-js",
+    title: "NestJS",
+    framework: "NestJS",
+    language: "JavaScript",
+    description: "Structured NestJS backend generated with the Nest CLI.",
+    tags: ["Node", "NestJS", "API"],
+    versions: [
+      {
+        id: "nestjs-js-latest",
+        label: "Latest",
+        command: "npx @nestjs/cli@latest new my-app --package-manager npm --skip-git --language JS",
+      },
+    ],
+  },
   {
     cardId: "vite-react-ts",
     title: "React + Vite",
@@ -491,7 +641,7 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         <>
           <div className="template-toolbar">
             <div className="template-tabs">
-              {(["All", "JavaScript", "TypeScript", "PHP"] as LanguageFilter[]).map((item) => (
+              {(["All", "JavaScript", "TypeScript", "Python", "PHP"] as LanguageFilter[]).map((item) => (
                 <button
                   key={item}
                   className={`template-tab ${language === item ? "active" : ""}`}

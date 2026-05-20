@@ -1,15 +1,26 @@
 import type { ScriptInfo } from "../types";
 
+type ScriptButtonInfo = ScriptInfo & { key: string; isCustom?: boolean };
+
 interface Props {
-  script: ScriptInfo;
+  script: ScriptButtonInfo;
   isRunning: boolean;
   isPinned: boolean;
-  onStart: (script: ScriptInfo) => void;
-  onStop: (script: ScriptInfo) => void;
-  onTogglePin: (script: ScriptInfo) => void;
+  onStart: (script: ScriptButtonInfo) => void;
+  onStop: (script: ScriptButtonInfo) => void;
+  onTogglePin: (script: ScriptButtonInfo) => void;
+  onRemove?: (script: ScriptButtonInfo) => void;
 }
 
-function ScriptButton({ script, isRunning, isPinned, onStart, onStop, onTogglePin }: Props) {
+function ScriptButton({
+  script,
+  isRunning,
+  isPinned,
+  onStart,
+  onStop,
+  onTogglePin,
+  onRemove,
+}: Props) {
   return (
     <div className={`script-card ${isRunning ? "running" : ""} ${isPinned ? "pinned" : ""}`}>
       <button
@@ -32,10 +43,32 @@ function ScriptButton({ script, isRunning, isPinned, onStart, onStop, onTogglePi
         </svg>
       </button>
       <div className="script-info">
-        <span className="script-name">{script.name}</span>
+        <span className="script-name-row">
+          <span className="script-name">{script.name}</span>
+          {script.source && (
+            <span className={`script-source ${script.isCustom ? "custom" : ""}`}>
+              {script.source}
+            </span>
+          )}
+        </span>
         <span className="script-command">{script.command}</span>
       </div>
       <div className="script-actions">
+        {script.isCustom && onRemove && !isRunning && (
+          <button
+            className="btn-remove-command"
+            onClick={() => onRemove(script)}
+            title="Remove custom command"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18" />
+              <path d="M8 6V4h8v2" />
+              <path d="M19 6l-1 14H6L5 6" />
+              <path d="M10 11v5" />
+              <path d="M14 11v5" />
+            </svg>
+          </button>
+        )}
         {isRunning ? (
           <button
             className="btn-stop"
