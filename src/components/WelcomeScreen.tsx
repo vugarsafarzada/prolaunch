@@ -72,7 +72,7 @@ function WelcomeScreen({ onProjectOpen }: Props) {
       setErrorMessage(`Could not remove recent project: ${String(err)}`);
       invoke<string[]>("load_recent_projects").then(
         (paths) => setRecentProjects(paths),
-        () => {},
+        () => { },
       );
     }
   };
@@ -107,9 +107,9 @@ function WelcomeScreen({ onProjectOpen }: Props) {
     <div className="welcome-screen">
       <div className="welcome-content">
         <div className="welcome-logo">
-          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="16 18 22 12 16 6" />
-            <polyline points="8 6 2 12 8 18" />
+          <svg width="150" height="150" viewBox="0 0 150 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="150" height="150" rx="33" fill="#0345FC" />
+            <rect x="38" y="38" width="75" height="75" rx="12" fill="white" />
           </svg>
         </div>
         <h1>ProLaunch</h1>
