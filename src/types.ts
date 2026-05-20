@@ -1,6 +1,8 @@
 export interface ScriptInfo {
   name: string;
   command: string;
+  packageManager?: string;
+  source?: string;
 }
 
 export interface ProjectInfo {

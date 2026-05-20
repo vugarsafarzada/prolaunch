@@ -1,5 +1,5 @@
 [package]
-name = "project-1"
+name = "ProLaunch"
 version = "0.1.0"
 description = "prolaunch - Desktop app for managing dev scripts"
 authors = ["you"]
@@ -18,4 +18,4 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
+toml = "0.8"

@@ -9,6 +9,43 @@ interface Props {
   onReRun: () => void;
 }
 
+function logTone(log: LogLine) {
+  const text = log.text.toLowerCase();
+
+  if (
+    text.includes("warning") ||
+    text.includes("warn") ||
+    text.includes("deprecated")
+  ) {
+    return "warning";
+  }
+
+  if (
+    text.startsWith("error:") ||
+    text.includes(" failed") ||
+    text.includes("failed ") ||
+    text.includes("traceback") ||
+    text.includes("exception") ||
+    text.includes("fatal") ||
+    text.includes("panic") ||
+    /exit(ed)? with code [1-9]/.test(text)
+  ) {
+    return "error";
+  }
+
+  if (
+    text.includes("success") ||
+    text.includes("completed") ||
+    text.includes("started with") ||
+    text.includes("created successfully") ||
+    text.includes("process exited with code 0")
+  ) {
+    return "success";
+  }
+
+  return log.isError ? "warning" : "default";
+}
+
 function LogViewer({ logs, activeScript, isRunning, onClear, onReRun }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -43,7 +80,7 @@ function LogViewer({ logs, activeScript, isRunning, onClear, onReRun }: Props) {
           <div className="log-empty">No output yet. Run a script to see logs here.</div>
         ) : (
           logs.map((log, i) => (
-            <div key={i} className={`log-line ${log.isError ? "error" : ""}`}>
+            <div key={i} className={`log-line ${logTone(log)}`}>
               <span className="log-line-number">{i + 1}</span>
               <span className="log-line-text">{log.text}</span>
             </div>
