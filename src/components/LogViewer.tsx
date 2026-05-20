@@ -1,12 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LogLine } from "../types";
 
 interface Props {
   logs: LogLine[];
   activeScript: string | null;
   isRunning: boolean;
+  canSendInput?: boolean;
   onClear: () => void;
   onReRun: () => void;
+  onSendInput?: (input: string) => void;
 }
 
 function logTone(log: LogLine) {
@@ -46,12 +48,29 @@ function logTone(log: LogLine) {
   return log.isError ? "warning" : "default";
 }
 
-function LogViewer({ logs, activeScript, isRunning, onClear, onReRun }: Props) {
+function LogViewer({
+  logs,
+  activeScript,
+  isRunning,
+  canSendInput = false,
+  onClear,
+  onReRun,
+  onSendInput,
+}: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [terminalInput, setTerminalInput] = useState("");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
+
+  const sendInput = (mode: "enter" | "raw") => {
+    if (!canSendInput || !onSendInput || terminalInput.length === 0) return;
+
+    const input = mode === "enter" ? `${terminalInput}\n` : terminalInput;
+    onSendInput(input);
+    setTerminalInput("");
+  };
 
   return (
     <div className="log-viewer">
@@ -88,6 +107,38 @@ function LogViewer({ logs, activeScript, isRunning, onClear, onReRun }: Props) {
         )}
         <div ref={bottomRef} />
       </div>
+      {canSendInput && (
+        <div className="log-input-bar">
+          <input
+            value={terminalInput}
+            onChange={(e) => setTerminalInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                sendInput("enter");
+              }
+            }}
+            placeholder="Send input to process..."
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            onClick={() => sendInput("enter")}
+            disabled={terminalInput.length === 0}
+          >
+            Enter
+          </button>
+          <button
+            type="button"
+            onClick={() => sendInput("raw")}
+            disabled={terminalInput.length === 0}
+          >
+            Raw
+          </button>
+        </div>
+      )}
     </div>
   );
 }

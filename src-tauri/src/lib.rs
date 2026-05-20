@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
@@ -129,25 +129,18 @@ fn creation_parent_watch_script() -> &'static str {
     r#"
 parent_pid="$1"
 shift
-
-"$@" &
-child_pid=$!
+runner_pid=$$
 
 (
-  while kill -0 "$parent_pid" 2>/dev/null; do
+  while kill -0 "$parent_pid" 2>/dev/null && kill -0 "$runner_pid" 2>/dev/null; do
     sleep 1
   done
-  kill -TERM -$$ 2>/dev/null
+  kill -TERM -"$runner_pid" 2>/dev/null
   sleep 2
-  kill -KILL -$$ 2>/dev/null
-) &
-watcher_pid=$!
+  kill -KILL -"$runner_pid" 2>/dev/null
+) >/dev/null 2>&1 </dev/null &
 
-wait "$child_pid"
-status=$?
-kill "$watcher_pid" 2>/dev/null
-wait "$watcher_pid" 2>/dev/null
-exit "$status"
+exec "$@"
 "#
 }
 
@@ -2506,6 +2499,7 @@ fn run_script(
 
     let mut cmd = script_command(&app, &package_manager, &project_path, &script_name)?;
     cmd.current_dir(&project_path)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -2631,6 +2625,33 @@ fn run_script(
     });
 
     Ok(pid)
+}
+
+#[tauri::command]
+fn send_script_input(
+    state: State<'_, AppState>,
+    project_path: String,
+    script_name: String,
+    input: String,
+) -> Result<(), String> {
+    let process_key = format!("{}::{}", &project_path, &script_name);
+    let mut processes = state.running_processes.lock().map_err(|e| e.to_string())?;
+    let process = processes
+        .get_mut(&process_key)
+        .ok_or_else(|| format!("No running process found for '{}'", script_name))?;
+
+    let stdin = process
+        .child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| format!("Process '{}' is not accepting input", script_name))?;
+
+    stdin
+        .write_all(input.as_bytes())
+        .map_err(|e| format!("Failed to send input: {}", e))?;
+    stdin
+        .flush()
+        .map_err(|e| format!("Failed to flush input: {}", e))
 }
 
 #[tauri::command]
@@ -3003,6 +3024,7 @@ pub fn run() {
             create_project,
             read_package_json,
             run_script,
+            send_script_input,
             kill_script,
             kill_project_scripts,
             get_running_scripts,
