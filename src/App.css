@@ -211,12 +211,12 @@ body {
   font-size: 28px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 50px;
+  margin-bottom: 10px;
 }
 
 .welcome-subtitle {
   color: var(--text-secondary);
-  margin-bottom: 32px;
+  margin-bottom: 50px;
   font-size: 15px;
 }
 

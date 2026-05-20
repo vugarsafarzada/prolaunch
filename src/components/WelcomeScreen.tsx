@@ -113,7 +113,7 @@ function WelcomeScreen({ onProjectOpen }: Props) {
           </svg>
         </div>
         <h1>ProLaunch</h1>
-        <p className="welcome-subtitle">Manage your dev scripts with ease</p>
+        <p className="welcome-subtitle">Developed by <strong>Vugar Safarzada</strong> <br /> (github.com/vugarsafarzada)</p>
 
         <div className="welcome-actions">
           <button className="welcome-btn primary" onClick={handleOpenProject}>
