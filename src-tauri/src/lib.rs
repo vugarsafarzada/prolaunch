@@ -231,6 +231,12 @@ fn script_invocation(
         return Ok(shell_tool_command(command_line));
     }
 
+    if package_manager == "go" {
+        let project_dir = Path::new(project_path);
+        let command_line = go_script_command_line(project_dir, script_name)?;
+        return Ok(shell_tool_command(command_line));
+    }
+
     Ok(ToolCommand {
         program: package_manager_command(package_manager),
         args: vec![run_command, script_name.to_string()],
@@ -282,6 +288,8 @@ fn preferred_package_manager(path: &std::path::Path) -> String {
         "python".to_string()
     } else if path.join("main.py").exists() {
         "python".to_string()
+    } else if path.join("go.mod").exists() || path.join("main.go").exists() {
+        "go".to_string()
     } else if path.join("pubspec.yaml").exists() {
         preferred_pub_package_manager(path)
     } else if path.join("pnpm-lock.yaml").exists() {
@@ -321,7 +329,7 @@ fn preferred_node_package_manager(path: &std::path::Path) -> String {
 fn normalize_package_manager(package_manager: Option<String>, project_path: &str) -> String {
     match package_manager.as_deref() {
         Some("npm") | Some("pnpm") | Some("yarn") | Some("bun") | Some("composer")
-        | Some("python") | Some("dart") | Some("flutter") | Some("custom") => {
+        | Some("python") | Some("dart") | Some("flutter") | Some("go") | Some("custom") => {
             package_manager.unwrap()
         }
         _ => preferred_package_manager(std::path::Path::new(project_path)),
@@ -333,6 +341,7 @@ fn package_manager_command(package_manager: &str) -> String {
         return match package_manager {
             "bun" => "bun".to_string(),
             "composer" => "composer.bat".to_string(),
+            "go" => "go.exe".to_string(),
             _ => format!("{}.cmd", package_manager),
         };
     }
@@ -354,6 +363,12 @@ struct CreationStep {
     args: Vec<String>,
     cwd: PathBuf,
     display_command: Option<String>,
+    action: CreationStepAction,
+}
+
+enum CreationStepAction {
+    Command,
+    WriteFiles(Vec<(PathBuf, String)>),
 }
 
 #[derive(Clone)]
@@ -377,6 +392,7 @@ enum ToolRequirement {
     Python,
     Dart,
     Flutter,
+    Go,
 }
 
 fn npm_bin() -> String {
@@ -412,6 +428,14 @@ fn flutter_bin() -> String {
         "flutter.bat".to_string()
     } else {
         "flutter".to_string()
+    }
+}
+
+fn go_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "go.exe".to_string()
+    } else {
+        "go".to_string()
     }
 }
 
@@ -835,6 +859,8 @@ fn template_requirements(template_id: &str) -> Result<Vec<ToolRequirement>, Stri
         | "django-python-latest" => vec![ToolRequirement::Python],
         "dart-console-latest" => vec![ToolRequirement::Dart],
         "flutter-app-latest" => vec![ToolRequirement::Flutter],
+        "go-basic-latest" | "gin-go-latest" | "fiber-go-latest" | "echo-go-latest"
+        | "chi-go-latest" => vec![ToolRequirement::Go],
         _ => return Err(format!("Unknown project template '{}'", template_id)),
     };
 
@@ -921,6 +947,16 @@ fn prepare_create_toolchain(
         )?;
     }
 
+    if requirements.contains(&ToolRequirement::Go) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Go",
+            go_bin(),
+            vec!["version".to_string()],
+        )?;
+    }
+
     emit_create_log(app, creation_id, "Requirements ready.".to_string(), false);
     Ok(toolchain)
 }
@@ -963,6 +999,7 @@ fn creation_step(label: &str, program: String, args: Vec<&str>, cwd: &Path) -> C
         args: args.into_iter().map(str::to_string).collect(),
         cwd: cwd.to_path_buf(),
         display_command: None,
+        action: CreationStepAction::Command,
     }
 }
 
@@ -978,6 +1015,7 @@ fn creation_step_from_strings(
         args,
         cwd: cwd.to_path_buf(),
         display_command: None,
+        action: CreationStepAction::Command,
     }
 }
 
@@ -994,6 +1032,23 @@ fn creation_step_with_display(
         args,
         cwd: cwd.to_path_buf(),
         display_command: Some(display_command),
+        action: CreationStepAction::Command,
+    }
+}
+
+fn write_files_step(
+    label: &str,
+    files: Vec<(PathBuf, String)>,
+    cwd: &Path,
+    display_command: String,
+) -> CreationStep {
+    CreationStep {
+        label: label.to_string(),
+        program: String::new(),
+        args: Vec::new(),
+        cwd: cwd.to_path_buf(),
+        display_command: Some(display_command),
+        action: CreationStepAction::WriteFiles(files),
     }
 }
 
@@ -1167,6 +1222,159 @@ fn flutter_app_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep>
         vec!["create", project_name],
         parent_dir,
     )]
+}
+
+fn go_main_source(kind: &str) -> &'static str {
+    match kind {
+        "gin" => {
+            r#"package main
+
+import "github.com/gin-gonic/gin"
+
+func main() {
+	router := gin.Default()
+
+	router.GET("/", func(context *gin.Context) {
+		context.JSON(200, gin.H{"message": "Hello from Gin"})
+	})
+
+	router.Run(":8080")
+}
+"#
+        }
+        "fiber" => {
+            r#"package main
+
+import "github.com/gofiber/fiber/v2"
+
+func main() {
+	app := fiber.New()
+
+	app.Get("/", func(context *fiber.Ctx) error {
+		return context.JSON(fiber.Map{"message": "Hello from Fiber"})
+	})
+
+	app.Listen(":3000")
+}
+"#
+        }
+        "echo" => {
+            r#"package main
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+)
+
+func main() {
+	app := echo.New()
+
+	app.GET("/", func(context echo.Context) error {
+		return context.JSON(http.StatusOK, map[string]string{"message": "Hello from Echo"})
+	})
+
+	app.Logger.Fatal(app.Start(":1323"))
+}
+"#
+        }
+        "chi" => {
+            r#"package main
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+)
+
+func main() {
+	router := chi.NewRouter()
+
+	router.Get("/", func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(writer).Encode(map[string]string{"message": "Hello from Chi"})
+	})
+
+	http.ListenAndServe(":3000", router)
+}
+"#
+        }
+        _ => {
+            r#"package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello from Go")
+}
+"#
+        }
+    }
+}
+
+fn go_dependency(kind: &str) -> Option<&'static str> {
+    match kind {
+        "gin" => Some("github.com/gin-gonic/gin"),
+        "fiber" => Some("github.com/gofiber/fiber/v2"),
+        "echo" => Some("github.com/labstack/echo/v4"),
+        "chi" => Some("github.com/go-chi/chi/v5"),
+        _ => None,
+    }
+}
+
+fn go_project_steps(
+    kind: &str,
+    project_name: &str,
+    parent_dir: &Path,
+    target_dir: &Path,
+) -> Vec<CreationStep> {
+    let title = match kind {
+        "gin" => "Gin",
+        "fiber" => "Fiber",
+        "echo" => "Echo",
+        "chi" => "Chi",
+        _ => "Go",
+    };
+
+    let mut steps = vec![
+        write_files_step(
+            &format!("Create {} starter files", title),
+            vec![
+                (target_dir.join("main.go"), go_main_source(kind).to_string()),
+                (
+                    target_dir.join("README.md"),
+                    format!("# {}\n\nCreated with ProLaunch.\n", project_name),
+                ),
+            ],
+            parent_dir,
+            format!("$ ProLaunch scaffold {}", project_name),
+        ),
+        creation_step(
+            "Initialize Go module",
+            go_bin(),
+            vec!["mod", "init", project_name],
+            target_dir,
+        ),
+    ];
+
+    if let Some(dependency) = go_dependency(kind) {
+        steps.push(creation_step_from_strings(
+            &format!("Install {} dependency", title),
+            go_bin(),
+            vec!["get".to_string(), dependency.to_string()],
+            target_dir,
+        ));
+    }
+
+    steps.push(creation_step(
+        "Tidy Go module",
+        go_bin(),
+        vec!["mod", "tidy"],
+        target_dir,
+    ));
+
+    steps
 }
 
 fn node_backend_scaffold_script() -> &'static str {
@@ -1672,6 +1880,11 @@ fn creation_steps(
         ),
         "dart-console-latest" => dart_console_steps(project_name, parent_dir),
         "flutter-app-latest" => flutter_app_steps(project_name, parent_dir),
+        "go-basic-latest" => go_project_steps("basic", project_name, parent_dir, target_dir),
+        "gin-go-latest" => go_project_steps("gin", project_name, parent_dir, target_dir),
+        "fiber-go-latest" => go_project_steps("fiber", project_name, parent_dir, target_dir),
+        "echo-go-latest" => go_project_steps("echo", project_name, parent_dir, target_dir),
+        "chi-go-latest" => go_project_steps("chi", project_name, parent_dir, target_dir),
         "fastapi-python-latest" => python_project_steps(
             "fastapi",
             project_name,
@@ -1919,6 +2132,19 @@ fn run_creation_step(
         .unwrap_or_else(|| format!("$ {} {}", step.program, step.args.join(" ")));
     emit_create_log(app, creation_id, display_command, false);
 
+    if let CreationStepAction::WriteFiles(files) = &step.action {
+        for (path, content) in files {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("{} failed: {}", step.label, e))?;
+            }
+            std::fs::write(path, content).map_err(|e| format!("{} failed: {}", step.label, e))?;
+        }
+
+        emit_create_log(app, creation_id, format!("{} completed", step.label), false);
+        return Ok(());
+    }
+
     let mut command = creation_command(step);
     command
         .current_dir(&step.cwd)
@@ -2057,6 +2283,8 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
     let pyproject_path = project_dir.join("pyproject.toml");
     let main_py_path = project_dir.join("main.py");
     let pubspec_path = project_dir.join("pubspec.yaml");
+    let go_mod_path = project_dir.join("go.mod");
+    let main_go_path = project_dir.join("main.go");
 
     let mut scripts = Vec::new();
 
@@ -2088,12 +2316,26 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
         }
     }
 
+    if go_mod_path.exists() {
+        if let Ok(project) = read_go_project(project_path.clone(), &project_dir, &go_mod_path) {
+            scripts.extend(project.scripts);
+        }
+    }
+
     if main_py_path.exists()
         && !scripts.iter().any(|script: &ScriptInfo| {
             script.package_manager.as_deref() == Some("python") && script.name == "start"
         })
     {
         scripts.push(python_main_script());
+    }
+
+    if main_go_path.exists()
+        && !scripts.iter().any(|script: &ScriptInfo| {
+            script.package_manager.as_deref() == Some("go") && script.name == "start"
+        })
+    {
+        scripts.extend(go_main_scripts(&project_dir));
     }
 
     Ok(ProjectInfo {
@@ -2362,6 +2604,98 @@ fn read_pub_project(
     })
 }
 
+fn go_module_name(project_dir: &Path, content: &str) -> String {
+    content
+        .lines()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("module ")
+                .map(str::trim)
+                .filter(|module| !module.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| python_folder_project_name(project_dir))
+}
+
+fn has_go_main_package(project_dir: &Path) -> bool {
+    let entries = match std::fs::read_dir(project_dir) {
+        Ok(entries) => entries,
+        Err(_) => return project_dir.join("main.go").exists(),
+    };
+
+    entries.filter_map(Result::ok).any(|entry| {
+        let path = entry.path();
+        let is_go_file = path.extension().and_then(|ext| ext.to_str()) == Some("go");
+        let is_test_file = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.ends_with("_test.go"))
+            .unwrap_or(false);
+
+        is_go_file
+            && !is_test_file
+            && std::fs::read_to_string(path)
+                .map(|content| content.contains("package main"))
+                .unwrap_or(false)
+    })
+}
+
+fn go_scripts(project_dir: &Path, has_module: bool) -> Vec<ScriptInfo> {
+    let source = if has_module { "go.mod" } else { "main.go" };
+    let run_command = if has_module {
+        "go run ."
+    } else {
+        "go run main.go"
+    };
+    let mut scripts = Vec::new();
+
+    if has_module || project_dir.join("main.go").exists() {
+        scripts.push(("start", run_command));
+        scripts.push(("dev", run_command));
+    }
+
+    if has_module {
+        scripts.push(("test", "go test ./..."));
+        scripts.push(("tidy", "go mod tidy"));
+        scripts.push(("build", "go build ."));
+    }
+
+    scripts
+        .into_iter()
+        .map(|(name, command)| ScriptInfo {
+            name: name.to_string(),
+            command: command.to_string(),
+            package_manager: Some("go".to_string()),
+            source: Some(source.to_string()),
+        })
+        .collect()
+}
+
+fn go_main_scripts(project_dir: &Path) -> Vec<ScriptInfo> {
+    go_scripts(project_dir, false)
+}
+
+fn read_go_project(
+    project_path: String,
+    project_dir: &Path,
+    go_mod_path: &Path,
+) -> Result<ProjectInfo, String> {
+    let content = std::fs::read_to_string(go_mod_path)
+        .map_err(|e| format!("Failed to read go.mod: {}", e))?;
+
+    let mut scripts = go_scripts(project_dir, true);
+    if !has_go_main_package(project_dir) {
+        scripts.retain(|script| script.name != "start" && script.name != "dev");
+    }
+
+    Ok(ProjectInfo {
+        name: go_module_name(project_dir, &content),
+        path: project_path,
+        scripts,
+        package_manager: "go".to_string(),
+    })
+}
+
 fn pub_script_command_line(
     project_dir: &Path,
     package_manager: &str,
@@ -2384,6 +2718,27 @@ fn pub_script_command_line(
                 script_name
             )
         })
+}
+
+fn go_script_command_line(project_dir: &Path, script_name: &str) -> Result<String, String> {
+    let has_module = project_dir.join("go.mod").exists();
+    let mut scripts = if has_module {
+        go_scripts(project_dir, true)
+    } else if project_dir.join("main.go").exists() {
+        go_main_scripts(project_dir)
+    } else {
+        Vec::new()
+    };
+
+    if has_module && !has_go_main_package(project_dir) {
+        scripts.retain(|script| script.name != "start" && script.name != "dev");
+    }
+
+    scripts
+        .into_iter()
+        .find(|script| script.name == script_name)
+        .map(|script| script.command)
+        .ok_or_else(|| format!("Go script '{}' was not found", script_name))
 }
 
 fn python_script_command(project_dir: &Path, script_name: &str) -> Result<String, String> {

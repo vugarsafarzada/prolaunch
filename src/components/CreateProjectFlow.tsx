@@ -4,13 +4,18 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectInfo } from "../types";
 import angularIcon from "../../src-tauri/icons/supports/angular_logo.png";
+import chiIcon from "../../src-tauri/icons/supports/chi_logo.png";
 import codeigniterIcon from "../../src-tauri/icons/supports/codeIgniter_logo.png";
 import dartIcon from "../../src-tauri/icons/supports/dart_logo.png";
 import djangoIcon from "../../src-tauri/icons/supports/django_logo.png";
+import echoIcon from "../../src-tauri/icons/supports/echo_logo.png";
 import expressIcon from "../../src-tauri/icons/supports/express_logo.png";
 import fastapiIcon from "../../src-tauri/icons/supports/fastapi_logo.png";
+import fiberIcon from "../../src-tauri/icons/supports/fiber_logo.png";
 import flaskIcon from "../../src-tauri/icons/supports/flask_logo.png";
 import flutterIcon from "../../src-tauri/icons/supports/flutter_logo.png";
+import ginIcon from "../../src-tauri/icons/supports/gin_logo.png";
+import goIcon from "../../src-tauri/icons/supports/go_logo.png";
 import javascriptIcon from "../../src-tauri/icons/supports/javascript_logo.png";
 import laravelIcon from "../../src-tauri/icons/supports/laravel_logo.png";
 import nestjsIcon from "../../src-tauri/icons/supports/nestjs_logo.png";
@@ -26,7 +31,7 @@ import symfonyIcon from "../../src-tauri/icons/supports/symfony_logo.png";
 import typescriptIcon from "../../src-tauri/icons/supports/typescript_logo.png";
 import vueIcon from "../../src-tauri/icons/supports/vuejs_logo.png";
 
-type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP" | "Dart";
+type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP" | "Dart" | "Go";
 type CreateStep = "gallery" | "details" | "creating";
 
 interface TemplateVersion {
@@ -61,15 +66,58 @@ interface CreateLogLine {
   isError: boolean;
 }
 
+function createLogTone(log: CreateLogLine) {
+  const text = log.text.toLowerCase();
+
+  if (
+    text.startsWith("error:") ||
+    text.includes(" command not found") ||
+    text.includes(" failed") ||
+    text.includes("failed ") ||
+    text.includes("traceback") ||
+    text.includes("exception") ||
+    text.includes("fatal") ||
+    text.includes("panic") ||
+    /exit(ed)? with code [1-9]/.test(text)
+  ) {
+    return "error";
+  }
+
+  if (
+    text.includes("warning") ||
+    text.includes("warn") ||
+    text.includes("deprecated") ||
+    log.isError
+  ) {
+    return "warning";
+  }
+
+  if (
+    text.includes("success") ||
+    text.includes("successfully") ||
+    text.includes("completed") ||
+    text.includes("requirements ready")
+  ) {
+    return "success";
+  }
+
+  return "default";
+}
+
 type TemplateIconKey =
   | "angular"
+  | "chi"
   | "codeigniter"
   | "dart"
   | "django"
+  | "echo"
   | "express"
   | "fastapi"
+  | "fiber"
   | "flutter"
   | "flask"
+  | "gin"
+  | "go"
   | "javascript"
   | "laravel"
   | "nestjs"
@@ -96,13 +144,18 @@ const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
   angular: { label: "A", title: "Angular", className: "angular", src: angularIcon },
+  chi: { label: "Ch", title: "Chi", className: "chi", src: chiIcon },
   codeigniter: { label: "CI", title: "CodeIgniter", className: "codeigniter", src: codeigniterIcon },
   dart: { label: "D", title: "Dart", className: "dart", src: dartIcon },
   django: { label: "Dj", title: "Django", className: "django", src: djangoIcon },
+  echo: { label: "Ec", title: "Echo", className: "echo", src: echoIcon },
   express: { label: "Ex", title: "Express", className: "express", src: expressIcon },
   fastapi: { label: "FA", title: "FastAPI", className: "fastapi", src: fastapiIcon },
+  fiber: { label: "Fi", title: "Fiber", className: "fiber", src: fiberIcon },
   flutter: { label: "Fl", title: "Flutter", className: "flutter", src: flutterIcon },
   flask: { label: "Fl", title: "Flask", className: "flask", src: flaskIcon },
+  gin: { label: "Gi", title: "Gin", className: "gin", src: ginIcon },
+  go: { label: "Go", title: "Go", className: "go", src: goIcon },
   javascript: { label: "JS", title: "JavaScript", className: "javascript", src: javascriptIcon },
   laravel: { label: "L", title: "Laravel", className: "laravel", src: laravelIcon },
   nestjs: { label: "Ne", title: "NestJS", className: "nestjs", src: nestjsIcon },
@@ -120,6 +173,81 @@ const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
 };
 
 const PROJECT_TEMPLATES: ProjectTemplate[] = [
+  {
+    cardId: "go-basic",
+    title: "Go",
+    framework: "Go",
+    language: "Go",
+    description: "Minimal Go app with module setup and run scripts.",
+    tags: ["Go", "CLI", "Module"],
+    versions: [
+      {
+        id: "go-basic-latest",
+        label: "Latest",
+        command: "go mod init my-app && go run .",
+      },
+    ],
+  },
+  {
+    cardId: "gin-go",
+    title: "Gin",
+    framework: "Gin",
+    language: "Go",
+    description: "Go HTTP API starter using the Gin web framework.",
+    tags: ["Go", "Gin", "API"],
+    versions: [
+      {
+        id: "gin-go-latest",
+        label: "Latest",
+        command: "go mod init my-app && go get github.com/gin-gonic/gin",
+      },
+    ],
+  },
+  {
+    cardId: "fiber-go",
+    title: "Fiber",
+    framework: "Fiber",
+    language: "Go",
+    description: "Fast Go web app starter using Fiber.",
+    tags: ["Go", "Fiber", "Web"],
+    versions: [
+      {
+        id: "fiber-go-latest",
+        label: "Latest",
+        command: "go mod init my-app && go get github.com/gofiber/fiber/v2",
+      },
+    ],
+  },
+  {
+    cardId: "echo-go",
+    title: "Echo",
+    framework: "Echo",
+    language: "Go",
+    description: "Go API starter with Echo routing.",
+    tags: ["Go", "Echo", "API"],
+    versions: [
+      {
+        id: "echo-go-latest",
+        label: "Latest",
+        command: "go mod init my-app && go get github.com/labstack/echo/v4",
+      },
+    ],
+  },
+  {
+    cardId: "chi-go",
+    title: "Chi",
+    framework: "Chi",
+    language: "Go",
+    description: "Small Go router starter using Chi.",
+    tags: ["Go", "Chi", "Router"],
+    versions: [
+      {
+        id: "chi-go-latest",
+        label: "Latest",
+        command: "go mod init my-app && go get github.com/go-chi/chi/v5",
+      },
+    ],
+  },
   {
     cardId: "dart-console",
     title: "Dart",
@@ -576,6 +704,11 @@ function projectNameError(projectName: string): string | null {
 }
 
 function templateIconKey(template: ProjectTemplate): TemplateIconKey {
+  if (template.cardId.includes("gin")) return "gin";
+  if (template.cardId.includes("fiber")) return "fiber";
+  if (template.cardId.includes("echo")) return "echo";
+  if (template.cardId.includes("chi")) return "chi";
+  if (template.language === "Go") return "go";
   if (template.cardId.includes("flutter")) return "flutter";
   if (template.cardId.includes("dart")) return "dart";
   if (template.cardId.includes("fastapi")) return "fastapi";
@@ -792,7 +925,7 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         <>
           <div className="template-toolbar">
             <div className="template-tabs">
-              {(["All", "JavaScript", "TypeScript", "Python", "PHP", "Dart"] as LanguageFilter[]).map((item) => (
+              {(["All", "JavaScript", "TypeScript", "Python", "PHP", "Dart", "Go"] as LanguageFilter[]).map((item) => (
                 <button
                   key={item}
                   className={`template-tab ${language === item ? "active" : ""}`}
@@ -994,7 +1127,7 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
             </div>
             <div className="create-log-content">
               {createLogs.map((log, index) => (
-                <div key={`${index}-${log.text}`} className={`create-log-line ${log.isError ? "error" : ""}`}>
+                <div key={`${index}-${log.text}`} className={`create-log-line ${createLogTone(log)}`}>
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   <code>{log.text}</code>
                 </div>
