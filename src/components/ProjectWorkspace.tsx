@@ -381,6 +381,23 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
     }
   };
 
+  const handleSendInput = async (input: string) => {
+    if (!activeLog || !runningScripts.has(activeLog)) {
+      return;
+    }
+
+    try {
+      await invoke("send_script_input", {
+        projectPath: project.path,
+        scriptName: activeLog,
+        input,
+      });
+      addLog(activeLog, `> ${input.replace(/\n$/, "")}`, false);
+    } catch (err) {
+      addLog(activeLog, `Error sending input: ${err}`, true);
+    }
+  };
+
   const runningLogs = logs.filter(
     (log) => !activeLog || log.scriptName === activeLog,
   );
@@ -524,10 +541,12 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
           logs={runningLogs}
           activeScript={activeCommand?.name ?? activeLog}
           isRunning={activeLog ? runningScripts.has(activeLog) : false}
+          canSendInput={Boolean(activeLog && runningScripts.has(activeLog))}
           onClear={() => setLogs([])}
           onReRun={() => {
             if (activeCommand) handleRestart(activeCommand);
           }}
+          onSendInput={handleSendInput}
         />
       </div>
     </div>
