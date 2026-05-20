@@ -232,6 +232,12 @@ fn script_invocation(
         return Ok(shell_tool_command(command_line));
     }
 
+    if package_manager == "dart" || package_manager == "flutter" {
+        let project_dir = Path::new(project_path);
+        let command_line = pub_script_command_line(project_dir, package_manager, script_name)?;
+        return Ok(shell_tool_command(command_line));
+    }
+
     Ok(ToolCommand {
         program: package_manager_command(package_manager),
         args: vec![run_command, script_name.to_string()],
@@ -283,6 +289,8 @@ fn preferred_package_manager(path: &std::path::Path) -> String {
         "python".to_string()
     } else if path.join("main.py").exists() {
         "python".to_string()
+    } else if path.join("pubspec.yaml").exists() {
+        preferred_pub_package_manager(path)
     } else if path.join("pnpm-lock.yaml").exists() {
         "pnpm".to_string()
     } else if path.join("yarn.lock").exists() || path.join(".yarnrc.yml").exists() {
@@ -291,6 +299,17 @@ fn preferred_package_manager(path: &std::path::Path) -> String {
         "bun".to_string()
     } else {
         "npm".to_string()
+    }
+}
+
+fn is_flutter_pubspec(content: &str) -> bool {
+    content.contains("sdk: flutter") || content.lines().any(|line| line.trim() == "flutter:")
+}
+
+fn preferred_pub_package_manager(path: &std::path::Path) -> String {
+    match std::fs::read_to_string(path.join("pubspec.yaml")) {
+        Ok(content) if is_flutter_pubspec(&content) => "flutter".to_string(),
+        _ => "dart".to_string(),
     }
 }
 
@@ -309,7 +328,9 @@ fn preferred_node_package_manager(path: &std::path::Path) -> String {
 fn normalize_package_manager(package_manager: Option<String>, project_path: &str) -> String {
     match package_manager.as_deref() {
         Some("npm") | Some("pnpm") | Some("yarn") | Some("bun") | Some("composer")
-        | Some("python") | Some("custom") => package_manager.unwrap(),
+        | Some("python") | Some("dart") | Some("flutter") | Some("custom") => {
+            package_manager.unwrap()
+        }
         _ => preferred_package_manager(std::path::Path::new(project_path)),
     }
 }
@@ -361,6 +382,8 @@ enum ToolRequirement {
     Php,
     Composer,
     Python,
+    Dart,
+    Flutter,
 }
 
 fn npm_bin() -> String {
@@ -381,6 +404,22 @@ fn npx_bin() -> String {
 
 fn composer_bin() -> String {
     package_manager_command("composer")
+}
+
+fn dart_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "dart.exe".to_string()
+    } else {
+        "dart".to_string()
+    }
+}
+
+fn flutter_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "flutter.bat".to_string()
+    } else {
+        "flutter".to_string()
+    }
 }
 
 fn php_bin() -> String {
@@ -801,6 +840,8 @@ fn template_requirements(template_id: &str) -> Result<Vec<ToolRequirement>, Stri
         | "fastapi-python-latest"
         | "flask-python-latest"
         | "django-python-latest" => vec![ToolRequirement::Python],
+        "dart-console-latest" => vec![ToolRequirement::Dart],
+        "flutter-app-latest" => vec![ToolRequirement::Flutter],
         _ => return Err(format!("Unknown project template '{}'", template_id)),
     };
 
@@ -865,6 +906,26 @@ fn prepare_create_toolchain(
 
     if requirements.contains(&ToolRequirement::Python) {
         toolchain.python = Some(prepare_python(app, creation_id)?);
+    }
+
+    if requirements.contains(&ToolRequirement::Dart) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Dart SDK",
+            dart_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Flutter) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Flutter SDK",
+            flutter_bin(),
+            vec!["--version".to_string()],
+        )?;
     }
 
     emit_create_log(app, creation_id, "Requirements ready.".to_string(), false);
@@ -1093,6 +1154,24 @@ fn angular_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
             "css",
             "--routing=false",
         ],
+        parent_dir,
+    )]
+}
+
+fn dart_console_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
+    vec![creation_step(
+        "Create Dart console project",
+        dart_bin(),
+        vec!["create", "-t", "console-simple", project_name],
+        parent_dir,
+    )]
+}
+
+fn flutter_app_steps(project_name: &str, parent_dir: &Path) -> Vec<CreationStep> {
+    vec![creation_step(
+        "Create Flutter project",
+        flutter_bin(),
+        vec!["create", project_name],
         parent_dir,
     )]
 }
@@ -1598,6 +1677,8 @@ fn creation_steps(
             target_dir,
             python.ok_or_else(|| "Python was not prepared".to_string())?,
         ),
+        "dart-console-latest" => dart_console_steps(project_name, parent_dir),
+        "flutter-app-latest" => flutter_app_steps(project_name, parent_dir),
         "fastapi-python-latest" => python_project_steps(
             "fastapi",
             project_name,
@@ -1982,6 +2063,7 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
     let package_path = project_dir.join("package.json");
     let pyproject_path = project_dir.join("pyproject.toml");
     let main_py_path = project_dir.join("main.py");
+    let pubspec_path = project_dir.join("pubspec.yaml");
 
     let mut scripts = Vec::new();
 
@@ -2003,6 +2085,12 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
 
     if package_path.exists() {
         if let Ok(project) = read_node_project(project_path.clone(), &project_dir, &package_path) {
+            scripts.extend(project.scripts);
+        }
+    }
+
+    if pubspec_path.exists() {
+        if let Ok(project) = read_pub_project(project_path.clone(), &project_dir, &pubspec_path) {
             scripts.extend(project.scripts);
         }
     }
@@ -2204,6 +2292,105 @@ fn read_python_project(
         scripts: read_python_scripts(&parsed),
         package_manager: "python".to_string(),
     })
+}
+
+fn yaml_top_level_string(content: &str, key: &str) -> Option<String> {
+    let prefix = format!("{}:", key);
+    content.lines().find_map(|line| {
+        if line.starts_with(char::is_whitespace) {
+            return None;
+        }
+
+        let trimmed = line.trim();
+        trimmed
+            .strip_prefix(&prefix)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.trim_matches(['"', '\'']).to_string())
+    })
+}
+
+fn pub_project_name(project_dir: &Path, content: &str) -> String {
+    yaml_top_level_string(content, "name")
+        .unwrap_or_else(|| python_folder_project_name(project_dir))
+}
+
+fn pub_scripts(is_flutter: bool, has_tests: bool) -> Vec<ScriptInfo> {
+    let mut scripts = if is_flutter {
+        vec![
+            ("dev", "flutter run"),
+            ("start", "flutter run"),
+            ("pub-get", "flutter pub get"),
+            ("build-web", "flutter build web"),
+        ]
+    } else {
+        vec![("start", "dart run"), ("pub-get", "dart pub get")]
+    };
+
+    if is_flutter || has_tests {
+        scripts.push((
+            "test",
+            if is_flutter {
+                "flutter test"
+            } else {
+                "dart test"
+            },
+        ));
+    }
+
+    let package_manager = if is_flutter { "flutter" } else { "dart" };
+    scripts
+        .into_iter()
+        .map(|(name, command)| ScriptInfo {
+            name: name.to_string(),
+            command: command.to_string(),
+            package_manager: Some(package_manager.to_string()),
+            source: Some("pubspec.yaml".to_string()),
+        })
+        .collect()
+}
+
+fn read_pub_project(
+    project_path: String,
+    project_dir: &Path,
+    pubspec_path: &Path,
+) -> Result<ProjectInfo, String> {
+    let content = std::fs::read_to_string(pubspec_path)
+        .map_err(|e| format!("Failed to read pubspec.yaml: {}", e))?;
+    let is_flutter = is_flutter_pubspec(&content);
+    let package_manager = if is_flutter { "flutter" } else { "dart" }.to_string();
+    let has_tests = project_dir.join("test").exists() || content.contains("\n  test:");
+
+    Ok(ProjectInfo {
+        name: pub_project_name(project_dir, &content),
+        path: project_path,
+        scripts: pub_scripts(is_flutter, has_tests),
+        package_manager,
+    })
+}
+
+fn pub_script_command_line(
+    project_dir: &Path,
+    package_manager: &str,
+    script_name: &str,
+) -> Result<String, String> {
+    let pubspec_path = project_dir.join("pubspec.yaml");
+    let content = std::fs::read_to_string(&pubspec_path)
+        .map_err(|e| format!("Failed to read pubspec.yaml: {}", e))?;
+    let is_flutter = package_manager == "flutter" || is_flutter_pubspec(&content);
+    let has_tests = project_dir.join("test").exists() || content.contains("\n  test:");
+
+    pub_scripts(is_flutter, has_tests)
+        .into_iter()
+        .find(|script| script.name == script_name)
+        .map(|script| script.command)
+        .ok_or_else(|| {
+            format!(
+                "{} script '{}' was not found in pubspec.yaml defaults",
+                if is_flutter { "Flutter" } else { "Dart" },
+                script_name
+            )
+        })
 }
 
 fn python_script_command(project_dir: &Path, script_name: &str) -> Result<String, String> {
@@ -2516,6 +2703,10 @@ fn detect_package_managers(project_path: String) -> Result<Vec<String>, String> 
 
     if !managers.iter().any(|manager| manager == "python") && path.join("main.py").exists() {
         managers.push("python".to_string());
+    }
+
+    if path.join("pubspec.yaml").exists() {
+        managers.push(preferred_pub_package_manager(path));
     }
 
     if path.join("package.json").exists() {

@@ -5,10 +5,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectInfo } from "../types";
 import angularIcon from "../../src-tauri/icons/supports/angular_logo.png";
 import codeigniterIcon from "../../src-tauri/icons/supports/codeIgniter_logo.png";
+import dartIcon from "../../src-tauri/icons/supports/dart_logo.png";
 import djangoIcon from "../../src-tauri/icons/supports/django_logo.png";
 import expressIcon from "../../src-tauri/icons/supports/express_logo.png";
 import fastapiIcon from "../../src-tauri/icons/supports/fastapi_logo.png";
 import flaskIcon from "../../src-tauri/icons/supports/flask_logo.png";
+import flutterIcon from "../../src-tauri/icons/supports/flutter_logo.png";
 import javascriptIcon from "../../src-tauri/icons/supports/javascript_logo.png";
 import laravelIcon from "../../src-tauri/icons/supports/laravel_logo.png";
 import nestjsIcon from "../../src-tauri/icons/supports/nestjs_logo.png";
@@ -24,7 +26,7 @@ import symfonyIcon from "../../src-tauri/icons/supports/symfony_logo.png";
 import typescriptIcon from "../../src-tauri/icons/supports/typescript_logo.png";
 import vueIcon from "../../src-tauri/icons/supports/vuejs_logo.png";
 
-type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP";
+type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP" | "Dart";
 type CreateStep = "gallery" | "details" | "creating";
 
 interface TemplateVersion {
@@ -62,9 +64,11 @@ interface CreateLogLine {
 type TemplateIconKey =
   | "angular"
   | "codeigniter"
+  | "dart"
   | "django"
   | "express"
   | "fastapi"
+  | "flutter"
   | "flask"
   | "javascript"
   | "laravel"
@@ -93,9 +97,11 @@ const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
   angular: { label: "A", title: "Angular", className: "angular", src: angularIcon },
   codeigniter: { label: "CI", title: "CodeIgniter", className: "codeigniter", src: codeigniterIcon },
+  dart: { label: "D", title: "Dart", className: "dart", src: dartIcon },
   django: { label: "Dj", title: "Django", className: "django", src: djangoIcon },
   express: { label: "Ex", title: "Express", className: "express", src: expressIcon },
   fastapi: { label: "FA", title: "FastAPI", className: "fastapi", src: fastapiIcon },
+  flutter: { label: "Fl", title: "Flutter", className: "flutter", src: flutterIcon },
   flask: { label: "Fl", title: "Flask", className: "flask", src: flaskIcon },
   javascript: { label: "JS", title: "JavaScript", className: "javascript", src: javascriptIcon },
   laravel: { label: "L", title: "Laravel", className: "laravel", src: laravelIcon },
@@ -114,6 +120,36 @@ const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
 };
 
 const PROJECT_TEMPLATES: ProjectTemplate[] = [
+  {
+    cardId: "dart-console",
+    title: "Dart",
+    framework: "Dart",
+    language: "Dart",
+    description: "Minimal Dart console app generated with Dart CLI.",
+    tags: ["Dart", "CLI", "Pub"],
+    versions: [
+      {
+        id: "dart-console-latest",
+        label: "Latest",
+        command: "dart create -t console-simple my-app",
+      },
+    ],
+  },
+  {
+    cardId: "flutter-app",
+    title: "Flutter",
+    framework: "Flutter",
+    language: "Dart",
+    description: "Cross-platform Flutter app generated with Flutter CLI.",
+    tags: ["Flutter", "Dart", "Mobile"],
+    versions: [
+      {
+        id: "flutter-app-latest",
+        label: "Latest",
+        command: "flutter create my-app",
+      },
+    ],
+  },
   {
     cardId: "python-basic",
     title: "Python",
@@ -540,6 +576,8 @@ function projectNameError(projectName: string): string | null {
 }
 
 function templateIconKey(template: ProjectTemplate): TemplateIconKey {
+  if (template.cardId.includes("flutter")) return "flutter";
+  if (template.cardId.includes("dart")) return "dart";
   if (template.cardId.includes("fastapi")) return "fastapi";
   if (template.cardId.includes("flask")) return "flask";
   if (template.cardId.includes("django")) return "django";
@@ -754,7 +792,7 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         <>
           <div className="template-toolbar">
             <div className="template-tabs">
-              {(["All", "JavaScript", "TypeScript", "Python", "PHP"] as LanguageFilter[]).map((item) => (
+              {(["All", "JavaScript", "TypeScript", "Python", "PHP", "Dart"] as LanguageFilter[]).map((item) => (
                 <button
                   key={item}
                   className={`template-tab ${language === item ? "active" : ""}`}
