@@ -255,6 +255,12 @@ fn script_invocation(
         return Ok(shell_tool_command(command_line));
     }
 
+    if package_manager == "ruby" {
+        let project_dir = Path::new(project_path);
+        let command_line = ruby_script_command_line(project_dir, script_name)?;
+        return Ok(shell_tool_command(command_line));
+    }
+
     Ok(ToolCommand {
         program: package_manager_command(package_manager),
         args: vec![run_command, script_name.to_string()],
@@ -314,6 +320,8 @@ fn preferred_package_manager(path: &std::path::Path) -> String {
         "gradle".to_string()
     } else if find_java_main_file(path).is_some() {
         "java".to_string()
+    } else if path.join("Gemfile").exists() || path.join("main.rb").exists() {
+        "ruby".to_string()
     } else if path.join("pubspec.yaml").exists() {
         preferred_pub_package_manager(path)
     } else if path.join("pnpm-lock.yaml").exists() {
@@ -354,7 +362,9 @@ fn normalize_package_manager(package_manager: Option<String>, project_path: &str
     match package_manager.as_deref() {
         Some("npm") | Some("pnpm") | Some("yarn") | Some("bun") | Some("composer")
         | Some("python") | Some("dart") | Some("flutter") | Some("go") | Some("java")
-        | Some("maven") | Some("gradle") | Some("custom") => package_manager.unwrap(),
+        | Some("maven") | Some("gradle") | Some("ruby") | Some("custom") => {
+            package_manager.unwrap()
+        }
         _ => preferred_package_manager(std::path::Path::new(project_path)),
     }
 }
@@ -368,6 +378,7 @@ fn package_manager_command(package_manager: &str) -> String {
             "java" => "java.exe".to_string(),
             "maven" => "mvn.cmd".to_string(),
             "gradle" => "gradle.bat".to_string(),
+            "ruby" => "ruby.exe".to_string(),
             _ => format!("{}.cmd", package_manager),
         };
     }
@@ -423,6 +434,8 @@ enum ToolRequirement {
     Javac,
     Maven,
     Gradle,
+    Ruby,
+    Bundler,
 }
 
 fn npm_bin() -> String {
@@ -498,6 +511,22 @@ fn gradle_bin() -> String {
         "gradle.bat".to_string()
     } else {
         "gradle".to_string()
+    }
+}
+
+fn ruby_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "ruby.exe".to_string()
+    } else {
+        "ruby".to_string()
+    }
+}
+
+fn bundle_bin() -> String {
+    if cfg!(target_os = "windows") {
+        "bundle.bat".to_string()
+    } else {
+        "bundle".to_string()
     }
 }
 
@@ -938,6 +967,10 @@ fn template_requirements(template_id: &str) -> Result<Vec<ToolRequirement>, Stri
                 ToolRequirement::Gradle,
             ]
         }
+        "ruby-basic-latest" => vec![ToolRequirement::Ruby],
+        "sinatra-ruby-latest" | "rails-ruby-latest" => {
+            vec![ToolRequirement::Ruby, ToolRequirement::Bundler]
+        }
         _ => return Err(format!("Unknown project template '{}'", template_id)),
     };
 
@@ -1070,6 +1103,26 @@ fn prepare_create_toolchain(
             creation_id,
             "Gradle",
             gradle_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Ruby) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Ruby",
+            ruby_bin(),
+            vec!["--version".to_string()],
+        )?;
+    }
+
+    if requirements.contains(&ToolRequirement::Bundler) {
+        check_required_tool(
+            app,
+            creation_id,
+            "Bundler",
+            bundle_bin(),
             vec!["--version".to_string()],
         )?;
     }
@@ -1738,6 +1791,262 @@ fn spring_boot_steps(
     ]
 }
 
+fn ruby_basic_steps(project_name: &str, parent_dir: &Path, target_dir: &Path) -> Vec<CreationStep> {
+    vec![write_files_step(
+        "Create Ruby starter files",
+        vec![
+            (
+                target_dir.join("main.rb"),
+                r#"puts "Hello from Ruby"
+"#
+                .to_string(),
+            ),
+            (
+                target_dir.join("README.md"),
+                format!("# {}\n\nCreated with ProLaunch.\n", project_name),
+            ),
+        ],
+        parent_dir,
+        format!("$ ProLaunch scaffold {}", project_name),
+    )]
+}
+
+fn sinatra_gemfile() -> &'static str {
+    r#"source "https://rubygems.org"
+
+gem "puma"
+gem "sinatra"
+"#
+}
+
+fn sinatra_app_source() -> &'static str {
+    r#"require "json"
+require "sinatra"
+
+set :bind, "0.0.0.0"
+set :port, ENV.fetch("PORT", 4567)
+
+get "/" do
+  content_type :json
+  { message: "Hello from Sinatra" }.to_json
+end
+"#
+}
+
+fn sinatra_steps(project_name: &str, parent_dir: &Path, target_dir: &Path) -> Vec<CreationStep> {
+    vec![
+        write_files_step(
+            "Create Sinatra starter files",
+            vec![
+                (target_dir.join("Gemfile"), sinatra_gemfile().to_string()),
+                (target_dir.join("app.rb"), sinatra_app_source().to_string()),
+                (
+                    target_dir.join("config.ru"),
+                    "require_relative \"app\"\nrun Sinatra::Application\n".to_string(),
+                ),
+                (
+                    target_dir.join("README.md"),
+                    format!("# {}\n\nCreated with ProLaunch.\n", project_name),
+                ),
+            ],
+            parent_dir,
+            format!("$ ProLaunch scaffold {}", project_name),
+        ),
+        creation_step(
+            "Install Ruby dependencies",
+            bundle_bin(),
+            vec!["install", "--path", "vendor/bundle"],
+            target_dir,
+        ),
+    ]
+}
+
+fn rails_gemfile() -> &'static str {
+    r#"source "https://rubygems.org"
+
+gem "rails", "~> 6.1.7"
+gem "puma", "~> 5.6"
+"#
+}
+
+fn rails_boot_source() -> &'static str {
+    r#"ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../Gemfile", __dir__)
+
+require "bundler/setup"
+"#
+}
+
+fn rails_application_source() -> &'static str {
+    r#"require_relative "boot"
+
+require "logger"
+require "rails"
+require "active_model/railtie"
+require "action_controller/railtie"
+require "rails/test_unit/railtie"
+
+Bundler.require(*Rails.groups)
+
+module ProlaunchApp
+  class Application < Rails::Application
+    config.load_defaults 6.1
+    config.api_only = true
+    config.require_master_key = false
+  end
+end
+"#
+}
+
+fn rails_environment_source() -> &'static str {
+    r#"require_relative "application"
+
+Rails.application.initialize!
+"#
+}
+
+fn rails_development_source() -> &'static str {
+    r#"Rails.application.configure do
+  config.cache_classes = false
+  config.eager_load = false
+  config.consider_all_requests_local = true
+end
+"#
+}
+
+fn rails_test_source() -> &'static str {
+    r#"Rails.application.configure do
+  config.cache_classes = true
+  config.eager_load = false
+  config.public_file_server.enabled = true
+  config.consider_all_requests_local = true
+end
+"#
+}
+
+fn rails_routes_source() -> &'static str {
+    r#"Rails.application.routes.draw do
+  root "home#index"
+end
+"#
+}
+
+fn rails_config_ru_source() -> &'static str {
+    r#"require_relative "config/environment"
+
+run Rails.application
+Rails.application.load_server
+"#
+}
+
+fn rails_puma_source() -> &'static str {
+    r#"port ENV.fetch("PORT", 3000)
+environment ENV.fetch("RAILS_ENV", "development")
+"#
+}
+
+fn rails_application_controller_source() -> &'static str {
+    r#"class ApplicationController < ActionController::API
+end
+"#
+}
+
+fn rails_home_controller_source() -> &'static str {
+    r#"class HomeController < ApplicationController
+  def index
+    render json: { message: "Hello from Rails" }
+  end
+end
+"#
+}
+
+fn rails_bin_source() -> &'static str {
+    r#"#!/usr/bin/env ruby
+
+APP_PATH = File.expand_path("../config/application", __dir__)
+require_relative "../config/boot"
+require "rails/commands"
+"#
+}
+
+fn rails_steps(project_name: &str, parent_dir: &Path, target_dir: &Path) -> Vec<CreationStep> {
+    vec![
+        write_files_step(
+            "Create Rails starter files",
+            vec![
+                (target_dir.join("Gemfile"), rails_gemfile().to_string()),
+                (
+                    target_dir.join("config").join("boot.rb"),
+                    rails_boot_source().to_string(),
+                ),
+                (
+                    target_dir.join("config").join("application.rb"),
+                    rails_application_source().to_string(),
+                ),
+                (
+                    target_dir.join("config").join("environment.rb"),
+                    rails_environment_source().to_string(),
+                ),
+                (
+                    target_dir
+                        .join("config")
+                        .join("environments")
+                        .join("development.rb"),
+                    rails_development_source().to_string(),
+                ),
+                (
+                    target_dir
+                        .join("config")
+                        .join("environments")
+                        .join("test.rb"),
+                    rails_test_source().to_string(),
+                ),
+                (
+                    target_dir.join("config").join("routes.rb"),
+                    rails_routes_source().to_string(),
+                ),
+                (
+                    target_dir.join("config").join("puma.rb"),
+                    rails_puma_source().to_string(),
+                ),
+                (
+                    target_dir.join("config.ru"),
+                    rails_config_ru_source().to_string(),
+                ),
+                (
+                    target_dir
+                        .join("app")
+                        .join("controllers")
+                        .join("application_controller.rb"),
+                    rails_application_controller_source().to_string(),
+                ),
+                (
+                    target_dir
+                        .join("app")
+                        .join("controllers")
+                        .join("home_controller.rb"),
+                    rails_home_controller_source().to_string(),
+                ),
+                (
+                    target_dir.join("bin").join("rails"),
+                    rails_bin_source().to_string(),
+                ),
+                (
+                    target_dir.join("README.md"),
+                    format!("# {}\n\nCreated with ProLaunch.\n", project_name),
+                ),
+            ],
+            parent_dir,
+            format!("$ ProLaunch scaffold {}", project_name),
+        ),
+        creation_step(
+            "Install Rails dependencies",
+            bundle_bin(),
+            vec!["install", "--path", "vendor/bundle"],
+            target_dir,
+        ),
+    ]
+}
+
 fn node_backend_scaffold_script() -> &'static str {
     r#"
 const fs = require("node:fs");
@@ -2245,6 +2554,9 @@ fn creation_steps(
         "maven-java-latest" => maven_java_steps(project_name, parent_dir, target_dir),
         "gradle-java-latest" => gradle_java_steps(project_name, parent_dir, target_dir),
         "spring-boot-java-latest" => spring_boot_steps(project_name, parent_dir, target_dir),
+        "ruby-basic-latest" => ruby_basic_steps(project_name, parent_dir, target_dir),
+        "sinatra-ruby-latest" => sinatra_steps(project_name, parent_dir, target_dir),
+        "rails-ruby-latest" => rails_steps(project_name, parent_dir, target_dir),
         "go-basic-latest" => go_project_steps("basic", project_name, parent_dir, target_dir),
         "gin-go-latest" => go_project_steps("gin", project_name, parent_dir, target_dir),
         "fiber-go-latest" => go_project_steps("fiber", project_name, parent_dir, target_dir),
@@ -2514,6 +2826,7 @@ fn run_creation_step(
     command
         .current_dir(&step.cwd)
         .env("CI", "1")
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -2653,6 +2966,8 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
     let pom_path = project_dir.join("pom.xml");
     let gradle_path = project_dir.join("build.gradle");
     let gradle_kts_path = project_dir.join("build.gradle.kts");
+    let gemfile_path = project_dir.join("Gemfile");
+    let main_rb_path = project_dir.join("main.rb");
 
     let mut scripts = Vec::new();
 
@@ -2707,6 +3022,12 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
         }
     }
 
+    if gemfile_path.exists() {
+        if let Ok(project) = read_ruby_project(project_path.clone(), &project_dir, &gemfile_path) {
+            scripts.extend(project.scripts);
+        }
+    }
+
     if main_py_path.exists()
         && !scripts.iter().any(|script: &ScriptInfo| {
             script.package_manager.as_deref() == Some("python") && script.name == "start"
@@ -2729,6 +3050,14 @@ fn read_package_json(project_path: String) -> Result<ProjectInfo, String> {
         }) {
             scripts.extend(java_main_scripts(&main_file));
         }
+    }
+
+    if main_rb_path.exists()
+        && !scripts.iter().any(|script: &ScriptInfo| {
+            script.package_manager.as_deref() == Some("ruby") && script.name == "start"
+        })
+    {
+        scripts.push(ruby_main_script());
     }
 
     Ok(ProjectInfo {
@@ -3358,6 +3687,120 @@ fn read_gradle_project(
     })
 }
 
+fn ruby_main_script() -> ScriptInfo {
+    ScriptInfo {
+        name: "start".to_string(),
+        command: "ruby main.rb".to_string(),
+        package_manager: Some("ruby".to_string()),
+        source: Some("main.rb".to_string()),
+    }
+}
+
+fn is_rails_project(project_dir: &Path, gemfile: &str) -> bool {
+    project_dir.join("config").join("application.rb").exists()
+        || project_dir.join("bin").join("rails").exists()
+        || gemfile.contains("rails")
+}
+
+fn is_sinatra_project(project_dir: &Path, gemfile: &str) -> bool {
+    project_dir.join("app.rb").exists() || gemfile.contains("sinatra")
+}
+
+fn rails_uses_active_record(project_dir: &Path, gemfile: &str) -> bool {
+    let application_path = project_dir.join("config").join("application.rb");
+    let application = std::fs::read_to_string(application_path).unwrap_or_default();
+
+    application.contains("rails/all")
+        || application.contains("active_record/railtie")
+        || gemfile.contains("sqlite3")
+        || gemfile.contains("pg")
+        || gemfile.contains("mysql2")
+}
+
+fn ruby_scripts(project_dir: &Path, gemfile: Option<&str>) -> Vec<ScriptInfo> {
+    let mut scripts = Vec::new();
+
+    if let Some(content) = gemfile {
+        if is_rails_project(project_dir, content) {
+            scripts.extend([
+                (
+                    "dev",
+                    "bundle exec ruby -rlogger bin/rails server",
+                    "Gemfile",
+                ),
+                (
+                    "start",
+                    "bundle exec ruby -rlogger bin/rails server",
+                    "Gemfile",
+                ),
+                (
+                    "console",
+                    "bundle exec ruby -rlogger bin/rails console",
+                    "Gemfile",
+                ),
+                (
+                    "test",
+                    "bundle exec ruby -rlogger bin/rails test",
+                    "Gemfile",
+                ),
+                (
+                    "routes",
+                    "bundle exec ruby -rlogger bin/rails routes",
+                    "Gemfile",
+                ),
+            ]);
+            if rails_uses_active_record(project_dir, content) {
+                scripts.push((
+                    "db-migrate",
+                    "bundle exec ruby -rlogger bin/rails db:migrate",
+                    "Gemfile",
+                ));
+            }
+        } else if is_sinatra_project(project_dir, content) {
+            scripts.extend([
+                ("dev", "bundle exec ruby app.rb", "Gemfile"),
+                ("start", "bundle exec ruby app.rb", "Gemfile"),
+            ]);
+        } else if project_dir.join("main.rb").exists() {
+            scripts.push(("start", "ruby main.rb", "main.rb"));
+        }
+
+        scripts.push((
+            "bundle-install",
+            "bundle install --path vendor/bundle",
+            "Gemfile",
+        ));
+    } else if project_dir.join("main.rb").exists() {
+        scripts.push(("start", "ruby main.rb", "main.rb"));
+    }
+
+    scripts
+        .into_iter()
+        .map(|(name, command, source)| ScriptInfo {
+            name: name.to_string(),
+            command: command.to_string(),
+            package_manager: Some("ruby".to_string()),
+            source: Some(source.to_string()),
+        })
+        .collect()
+}
+
+fn read_ruby_project(
+    project_path: String,
+    project_dir: &Path,
+    gemfile_path: &Path,
+) -> Result<ProjectInfo, String> {
+    let content = std::fs::read_to_string(gemfile_path)
+        .map_err(|e| format!("Failed to read Gemfile: {}", e))?;
+
+    Ok(ProjectInfo {
+        name: python_folder_project_name(project_dir),
+        path: project_path,
+        scripts: ruby_scripts(project_dir, Some(&content)),
+        package_manager: "ruby".to_string(),
+    })
+}
+
 fn pub_script_command_line(
     project_dir: &Path,
     package_manager: &str,
@@ -3441,6 +3884,25 @@ fn gradle_script_command_line(project_dir: &Path, script_name: &str) -> Result<S
         &tool,
         &args.into_iter().map(str::to_string).collect::<Vec<_>>(),
     ))
+}
+
+fn ruby_script_command_line(project_dir: &Path, script_name: &str) -> Result<String, String> {
+    let gemfile_path = project_dir.join("Gemfile");
+    let gemfile = if gemfile_path.exists() {
+        Some(
+            std::fs::read_to_string(&gemfile_path)
+                .map_err(|e| format!("Failed to read Gemfile: {}", e))?,
+        )
+    } else {
+        None
+    };
+    let scripts = ruby_scripts(project_dir, gemfile.as_deref());
+
+    scripts
+        .into_iter()
+        .find(|script| script.name == script_name)
+        .map(|script| script.command)
+        .ok_or_else(|| format!("Ruby script '{}' was not found", script_name))
 }
 
 fn python_script_command(project_dir: &Path, script_name: &str) -> Result<String, String> {

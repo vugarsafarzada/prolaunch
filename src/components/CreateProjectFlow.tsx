@@ -28,6 +28,9 @@ import nuxtIcon from "../../src-tauri/icons/supports/nuxtjs_logo.png";
 import phpIcon from "../../src-tauri/icons/supports/php_logo.png";
 import pythonIcon from "../../src-tauri/icons/supports/python_logo.png";
 import reactIcon from "../../src-tauri/icons/supports/react_logo.png";
+import railsIcon from "../../src-tauri/icons/supports/rails_logo.png";
+import rubyIcon from "../../src-tauri/icons/supports/ruby_logo.png";
+import sinatraIcon from "../../src-tauri/icons/supports/sinatra_logo.jpg";
 import slimIcon from "../../src-tauri/icons/supports/slim_logo.png";
 import svelteIcon from "../../src-tauri/icons/supports/svelte_logo.png";
 import springBootIcon from "../../src-tauri/icons/supports/spring_boot_logo.png";
@@ -35,7 +38,7 @@ import symfonyIcon from "../../src-tauri/icons/supports/symfony_logo.png";
 import typescriptIcon from "../../src-tauri/icons/supports/typescript_logo.png";
 import vueIcon from "../../src-tauri/icons/supports/vuejs_logo.png";
 
-type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP" | "Dart" | "Go" | "Java";
+type LanguageFilter = "All" | "JavaScript" | "TypeScript" | "Python" | "PHP" | "Dart" | "Go" | "Java" | "Ruby";
 type CreateStep = "gallery" | "details" | "creating";
 
 interface TemplateVersion {
@@ -133,7 +136,10 @@ type TemplateIconKey =
   | "nuxt"
   | "php"
   | "python"
+  | "rails"
   | "react"
+  | "ruby"
+  | "sinatra"
   | "slim"
   | "svelte"
   | "springBoot"
@@ -149,6 +155,17 @@ interface TemplateIconMeta {
 }
 
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+const LANGUAGE_TABS: LanguageFilter[] = [
+  "All",
+  "Dart",
+  "Go",
+  "Java",
+  "JavaScript",
+  "PHP",
+  "Python",
+  "Ruby",
+  "TypeScript",
+];
 
 const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
   angular: { label: "A", title: "Angular", className: "angular", src: angularIcon },
@@ -175,7 +192,10 @@ const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
   nuxt: { label: "N", title: "Nuxt", className: "nuxt", src: nuxtIcon },
   php: { label: "PHP", title: "PHP", className: "php", src: phpIcon },
   python: { label: "Py", title: "Python", className: "python", src: pythonIcon },
+  rails: { label: "Ra", title: "Rails", className: "rails", src: railsIcon },
   react: { label: "R", title: "React", className: "react", src: reactIcon },
+  ruby: { label: "Rb", title: "Ruby", className: "ruby", src: rubyIcon },
+  sinatra: { label: "Si", title: "Sinatra", className: "sinatra", src: sinatraIcon },
   slim: { label: "S", title: "Slim", className: "slim", src: slimIcon },
   svelte: { label: "S", title: "Svelte", className: "svelte", src: svelteIcon },
   springBoot: { label: "SB", title: "Spring Boot", className: "spring-boot", src: springBootIcon },
@@ -185,6 +205,51 @@ const TEMPLATE_ICONS: Record<TemplateIconKey, TemplateIconMeta> = {
 };
 
 const PROJECT_TEMPLATES: ProjectTemplate[] = [
+  {
+    cardId: "ruby-basic",
+    title: "Ruby",
+    framework: "Ruby",
+    language: "Ruby",
+    description: "Minimal Ruby app with a single main.rb entrypoint.",
+    tags: ["Ruby", "CLI"],
+    versions: [
+      {
+        id: "ruby-basic-latest",
+        label: "Latest",
+        command: "ruby main.rb",
+      },
+    ],
+  },
+  {
+    cardId: "sinatra-ruby",
+    title: "Sinatra",
+    framework: "Sinatra",
+    language: "Ruby",
+    description: "Lightweight Ruby web app with Sinatra and Bundler.",
+    tags: ["Ruby", "Sinatra", "Web"],
+    versions: [
+      {
+        id: "sinatra-ruby-latest",
+        label: "Latest",
+        command: "bundle exec ruby app.rb",
+      },
+    ],
+  },
+  {
+    cardId: "rails-ruby",
+    title: "Rails",
+    framework: "Rails",
+    language: "Ruby",
+    description: "Minimal Rails API starter with local Bundler install.",
+    tags: ["Ruby", "Rails", "MVC"],
+    versions: [
+      {
+        id: "rails-ruby-latest",
+        label: "6.1.x",
+        command: "bundle exec ruby -rlogger bin/rails server",
+      },
+    ],
+  },
   {
     cardId: "java-basic",
     title: "Java",
@@ -776,6 +841,9 @@ function projectNameError(projectName: string): string | null {
 }
 
 function templateIconKey(template: ProjectTemplate): TemplateIconKey {
+  if (template.cardId.includes("rails")) return "rails";
+  if (template.cardId.includes("sinatra")) return "sinatra";
+  if (template.language === "Ruby") return "ruby";
   if (template.cardId.includes("spring-boot")) return "springBoot";
   if (template.cardId.includes("maven")) return "maven";
   if (template.cardId.includes("gradle")) return "gradle";
@@ -865,6 +933,14 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
       ].join(" ").toLowerCase();
 
       return searchable.includes(normalizedQuery);
+    }).sort((a, b) => {
+      const languageOrder = a.language.localeCompare(b.language);
+      if (languageOrder !== 0) return languageOrder;
+
+      const titleOrder = a.title.localeCompare(b.title);
+      if (titleOrder !== 0) return titleOrder;
+
+      return a.cardId.localeCompare(b.cardId);
     });
   }, [language, searchQuery]);
 
@@ -1001,7 +1077,7 @@ function CreateProjectFlow({ onBack, onProjectOpen }: Props) {
         <>
           <div className="template-toolbar">
             <div className="template-tabs">
-              {(["All", "JavaScript", "TypeScript", "Python", "PHP", "Dart", "Go", "Java"] as LanguageFilter[]).map((item) => (
+              {LANGUAGE_TABS.map((item) => (
                 <button
                   key={item}
                   className={`template-tab ${language === item ? "active" : ""}`}
