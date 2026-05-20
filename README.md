@@ -34,7 +34,9 @@ The script:
 2. Installs Rust automatically (via `rustup`) if it is missing.
 3. Installs the platform build dependencies.
 4. Builds the app from source.
-5. Installs it — macOS: `/Applications`, Linux: `~/.local/bin/prolaunch`.
+5. Installs it and adds it to your menu — macOS: `/Applications` (Launchpad
+   / Spotlight); Linux: application menu (via the `.deb`, or a desktop entry
+   for non-apt systems).
 6. Deletes the clone and all build artifacts.
 
 **Prerequisites you must have already:** `git`, `curl`, and

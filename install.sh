@@ -86,17 +86,37 @@ case "$OS" in
     info "Done. Launch ProLaunch from Applications or Spotlight."
     ;;
   Linux)
-    APPIMAGE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' 2>/dev/null | head -1)"
-    [ -n "$APPIMAGE" ] || err "Build output not found."
-    DEST="$HOME/.local/bin"
-    mkdir -p "$DEST"
-    cp "$APPIMAGE" "$DEST/$APP_NAME"
-    chmod +x "$DEST/$APP_NAME"
-    info "Done. Installed to $DEST/$APP_NAME"
-    case ":$PATH:" in
-      *":$DEST:"*) ;;
-      *) info "Add $DEST to your PATH to run '$APP_NAME' from anywhere." ;;
-    esac
+    if command -v apt-get >/dev/null 2>&1; then
+      # .deb path — dpkg registers the menu entry, icon and PATH automatically.
+      DEB="$(find src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' 2>/dev/null | head -1)"
+      [ -n "$DEB" ] || err "Build output (.deb) not found."
+      info "Installing the .deb package (sudo required)..."
+      sudo apt-get install -y "$(realpath "$DEB")"
+      info "Done. ProLaunch is now in your application menu."
+    else
+      # AppImage path — install the binary and write a desktop entry by hand.
+      APPIMAGE="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' 2>/dev/null | head -1)"
+      [ -n "$APPIMAGE" ] || err "Build output not found."
+      DEST="$HOME/.local/bin"
+      ICON_DIR="$HOME/.local/share/icons"
+      APPS_DIR="$HOME/.local/share/applications"
+      mkdir -p "$DEST" "$ICON_DIR" "$APPS_DIR"
+      cp "$APPIMAGE" "$DEST/$APP_NAME"
+      chmod +x "$DEST/$APP_NAME"
+      cp src-tauri/icons/128x128.png "$ICON_DIR/$APP_NAME.png"
+      cat > "$APPS_DIR/$APP_NAME.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=ProLaunch
+Comment=Run project scripts visually
+Exec=$DEST/$APP_NAME
+Icon=$ICON_DIR/$APP_NAME.png
+Terminal=false
+Categories=Development;Utility;
+EOF
+      command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" || true
+      info "Done. ProLaunch is now in your application menu."
+    fi
     ;;
 esac
 
