@@ -702,11 +702,7 @@ fn run_script(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
+    isolate_child_process(&mut cmd);
 
     let child = cmd
         .spawn()

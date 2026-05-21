@@ -1,17 +1,16 @@
 # ProLaunch
 
-A cross-platform desktop app that turns terminal commands into a visual
-interface. Open any project folder — ProLaunch reads its `package.json`
-scripts and shows them as buttons. Click to run, watch live logs, kill or
-restart processes, see which ports are in use — no terminal needed.
+A cross-platform desktop app that turns project commands into a visual
+interface. Open any project folder — ProLaunch detects available commands and
+shows them as buttons. Click to run, watch live logs, kill or restart
+processes, see which ports are in use — no terminal needed.
 
 Works on **macOS, Windows and Linux**. Built with Tauri + React + TypeScript.
 
 ## Features
 
-- Create new projects from a template gallery (React, Vue, Svelte, Next.js,
-  Nuxt, Angular, NestJS, Express, React Native and more — JS & TS).
-- Open existing projects and run their scripts as buttons.
+- Create new projects from a growing template gallery for common app types.
+- Open existing projects and run detected or custom commands as buttons.
 - Live logs, kill / restart, port monitoring.
 - Search and pin commands; running commands float to the top.
 - Recently opened projects, multi-tab workspace with browser-style shortcuts.

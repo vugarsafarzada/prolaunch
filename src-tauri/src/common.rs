@@ -2,7 +2,7 @@
 //! Shared infrastructure: state, process management, tool helpers, creation steps.
 
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
@@ -64,16 +64,58 @@ pub(crate) struct ProjectInfo {
     pub(crate) package_manager: String,
 }
 
+#[cfg(unix)]
+fn unix_process_group(pid: u32) -> Option<libc::pid_t> {
+    let pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
+    (pgid > 0).then_some(pgid)
+}
+
+#[cfg(unix)]
+fn unix_signal_process(pid: libc::pid_t, signal: libc::c_int) -> Result<(), String> {
+    let result = unsafe { libc::kill(pid, signal) };
+    if result == 0 {
+        return Ok(());
+    }
+
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(());
+    }
+
+    Err(error.to_string())
+}
+
+#[cfg(unix)]
+fn unix_signal_owned_group(pid: u32, signal: libc::c_int) -> Result<(), String> {
+    let pgid = unix_process_group(pid);
+    if pgid == Some(pid as libc::pid_t) {
+        unix_signal_process(-(pid as libc::pid_t), signal)
+    } else {
+        unix_signal_process(pid as libc::pid_t, signal)
+    }
+}
+
+pub(crate) fn isolate_child_process(command: &mut Command) {
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+}
+
 pub(crate) fn kill_process_id(pid: u32) -> Result<(), String> {
     #[cfg(unix)]
     {
-        let _ = Command::new("kill")
-            .args(["-TERM", &format!("-{}", pid)])
-            .status();
+        let _ = unix_signal_owned_group(pid, libc::SIGTERM);
         std::thread::sleep(Duration::from_secs(2));
-        let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{}", pid)])
-            .status();
+        let _ = unix_signal_owned_group(pid, libc::SIGKILL);
     }
 
     #[cfg(windows)]
@@ -95,9 +137,7 @@ pub(crate) fn kill_process_group(child: &mut Child) -> Result<(), String> {
 
     #[cfg(unix)]
     {
-        let _ = Command::new("kill")
-            .args(["-TERM", &format!("-{}", pid)])
-            .status();
+        let _ = unix_signal_owned_group(pid, libc::SIGTERM);
 
         for _ in 0..20 {
             match child.try_wait() {
@@ -107,9 +147,7 @@ pub(crate) fn kill_process_group(child: &mut Child) -> Result<(), String> {
             }
         }
 
-        let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{}", pid)])
-            .status();
+        let _ = unix_signal_owned_group(pid, libc::SIGKILL);
     }
 
     #[cfg(windows)]
@@ -134,13 +172,24 @@ parent_pid="$1"
 shift
 runner_pid=$$
 
+stop_runner() {
+  runner_pgid="$(ps -o pgid= -p "$runner_pid" 2>/dev/null | tr -d '[:space:]')"
+  if [ "$runner_pgid" = "$runner_pid" ]; then
+    kill -TERM -"$runner_pid" 2>/dev/null
+    sleep 2
+    kill -KILL -"$runner_pid" 2>/dev/null
+  else
+    kill -TERM "$runner_pid" 2>/dev/null
+    sleep 2
+    kill -KILL "$runner_pid" 2>/dev/null
+  fi
+}
+
 (
   while kill -0 "$parent_pid" 2>/dev/null && kill -0 "$runner_pid" 2>/dev/null; do
     sleep 1
   done
-  kill -TERM -"$runner_pid" 2>/dev/null
-  sleep 2
-  kill -KILL -"$runner_pid" 2>/dev/null
+  stop_runner
 ) >/dev/null 2>&1 </dev/null &
 
 exec "$@"
@@ -628,11 +677,7 @@ pub(crate) fn run_creation_step(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
+    isolate_child_process(&mut command);
 
     let mut child = command
         .spawn()
