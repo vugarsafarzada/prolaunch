@@ -701,6 +701,7 @@ fn run_script(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    apply_command_environment(&mut cmd);
 
     isolate_child_process(&mut cmd);
 

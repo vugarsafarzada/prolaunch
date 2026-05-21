@@ -2,12 +2,13 @@
 //! Shared infrastructure: state, process management, tool helpers, creation steps.
 
 use std::collections::HashMap;
+use std::env;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Mutex,
+    Mutex, OnceLock,
 };
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -62,6 +63,141 @@ pub(crate) struct ProjectInfo {
     pub(crate) scripts: Vec<ScriptInfo>,
     #[serde(rename = "packageManager")]
     pub(crate) package_manager: String,
+}
+
+static EFFECTIVE_PATH: OnceLock<String> = OnceLock::new();
+
+fn push_path_dir(dirs: &mut Vec<PathBuf>, path: PathBuf) {
+    if path.is_dir() && !dirs.iter().any(|existing| existing == &path) {
+        dirs.push(path);
+    }
+}
+
+fn push_split_path(dirs: &mut Vec<PathBuf>, value: &str) {
+    for path in env::split_paths(value) {
+        push_path_dir(dirs, path);
+    }
+}
+
+fn push_version_manager_bins(dirs: &mut Vec<PathBuf>, base: PathBuf, suffix: &[&str]) {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+
+    let mut bins = entries
+        .filter_map(Result::ok)
+        .map(|entry| {
+            suffix
+                .iter()
+                .fold(entry.path(), |path, segment| path.join(segment))
+        })
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+
+    bins.sort();
+    bins.reverse();
+
+    for bin in bins {
+        push_path_dir(dirs, bin);
+    }
+}
+
+fn append_developer_path_dirs(dirs: &mut Vec<PathBuf>) {
+    for path in [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/opt/homebrew/opt/openjdk/bin",
+        "/opt/homebrew/opt/maven/bin",
+        "/opt/homebrew/opt/gradle/bin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/local/opt/openjdk/bin",
+        "/usr/local/opt/maven/bin",
+        "/usr/local/opt/gradle/bin",
+        "/usr/local/go/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/snap/bin",
+    ] {
+        push_path_dir(dirs, PathBuf::from(path));
+    }
+
+    let Some(home) = env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+
+    for path in [
+        ".local/bin",
+        ".cargo/bin",
+        ".volta/bin",
+        ".bun/bin",
+        ".deno/bin",
+        ".asdf/shims",
+        ".pyenv/shims",
+        ".rbenv/shims",
+        "go/bin",
+        ".sdkman/candidates/java/current/bin",
+        ".sdkman/candidates/maven/current/bin",
+        ".sdkman/candidates/gradle/current/bin",
+    ] {
+        push_path_dir(dirs, home.join(path));
+    }
+
+    push_version_manager_bins(dirs, home.join(".nvm/versions/node"), &["bin"]);
+    push_version_manager_bins(
+        dirs,
+        home.join(".fnm/node-versions"),
+        &["installation", "bin"],
+    );
+    push_version_manager_bins(
+        dirs,
+        home.join(".local/share/fnm/node-versions"),
+        &["installation", "bin"],
+    );
+}
+
+pub(crate) fn effective_path() -> &'static str {
+    EFFECTIVE_PATH.get_or_init(|| {
+        let mut dirs = Vec::new();
+        if let Ok(path) = env::var("PATH") {
+            push_split_path(&mut dirs, &path);
+        }
+        append_developer_path_dirs(&mut dirs);
+
+        env::join_paths(dirs)
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_else(|_| env::var("PATH").unwrap_or_default())
+    })
+}
+
+pub(crate) fn apply_command_environment(command: &mut Command) {
+    command.env("PATH", effective_path());
+}
+
+pub(crate) fn resolve_program(program: &str) -> String {
+    let program_path = Path::new(program);
+    if program_path.is_absolute() || program_path.components().count() > 1 {
+        return program.to_string();
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        for dir in env::split_paths(effective_path()) {
+            let candidate = dir.join(program);
+            let Ok(metadata) = candidate.metadata() else {
+                continue;
+            };
+            if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    program.to_string()
 }
 
 #[cfg(unix)]
@@ -304,11 +440,13 @@ pub(crate) fn command_output(
     args: &[String],
     cwd: Option<&Path>,
 ) -> Result<String, String> {
-    let mut command = Command::new(program);
+    let resolved_program = resolve_program(program);
+    let mut command = Command::new(&resolved_program);
     command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    apply_command_environment(&mut command);
 
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
@@ -676,6 +814,7 @@ pub(crate) fn run_creation_step(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    apply_command_environment(&mut command);
 
     isolate_child_process(&mut command);
 
