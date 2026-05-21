@@ -1,4 +1,5 @@
-# ProLaunch
+
+# <img width="32" height="32" alt="32x32" src="https://github.com/user-attachments/assets/9b85dfc7-b82f-4d99-9292-737396419d58" /> ProLaunch
 
 A cross-platform desktop app that turns project commands into a visual
 interface. Open any project folder — ProLaunch detects available commands and
@@ -7,13 +8,18 @@ processes, see which ports are in use — no terminal needed.
 
 Works on **macOS, Windows and Linux**. Built with Tauri + React + TypeScript.
 
-## Features
+<img width="1554" height="1080" alt="openproject" src="https://github.com/user-attachments/assets/9af6f98c-f18b-4213-9cfe-eb98675c7862" />
 
+## Features
 - Create new projects from a growing template gallery for common app types.
 - Open existing projects and run detected or custom commands as buttons.
 - Live logs, kill / restart, port monitoring.
 - Search and pin commands; running commands float to the top.
-- Recently opened projects, multi-tab workspace with browser-style shortcuts.
+- Recently opened projects, multi-tab workspace with browser
+-style shortcuts.
+
+<img width="1554" height="1080" alt="0521" src="https://github.com/user-attachments/assets/0e4694b6-6909-4e34-83df-c880b30f0d14" />
+
 
 ## Install
 
