@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type FormEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import ScriptButton from "./ScriptButton";
 import LogViewer from "./LogViewer";
 import type { ProjectInfo, ScriptInfo, LogEvent, ProcessEndEvent, LogLine } from "../types";
@@ -28,9 +27,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
   const folderRef = useRef<HTMLDivElement>(null);
   const startingScriptsRef = useRef<Set<string>>(new Set());
 
-  const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-  const isWindows = navigator.platform.toUpperCase().indexOf("WIN") >= 0;
-  const folderLabel = isMac ? "Finder" : isWindows ? "Explorer" : "File Manager";
+  const folderLabel = "Folder";
 
   const makeCommandKey = useCallback(
     (script: ScriptInfo & { isCustom?: boolean }) => {
@@ -101,7 +98,7 @@ function ProjectWorkspace({ project, onRunningChange }: Props) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showFolderMenu]);
 
-  const handleOpenFolder = () => revealItemInDir(project.path);
+  const handleOpenFolder = () => invoke("open_project_folder", { path: project.path });
   const handleOpenVSCode = () => invoke("open_in_vscode", { path: project.path });
   const handleOpenTerminal = () => invoke("open_in_terminal", { path: project.path });
 

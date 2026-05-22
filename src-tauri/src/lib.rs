@@ -1103,67 +1103,211 @@ fn clear_recent_projects(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_project_folder(path: String) -> Result<(), String> {
+    let folder = Path::new(&path);
+    if !folder.is_dir() {
+        return Err(format!("Folder does not exist: {}", path));
+    }
+
+    open_folder_with_candidates(&path).map_err(|e| format!("Failed to open folder: {}", e))
+}
+
+#[tauri::command]
 fn open_in_vscode(path: String) -> Result<(), String> {
-    Command::new("code")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("Failed to open VS Code: {}", e))?;
-    Ok(())
+    open_vscode_with_candidates(&path).map_err(|e| format!("Failed to open VS Code: {}", e))
+}
+
+fn spawn_detached(program: &str, args: &[&str]) -> Result<(), String> {
+    let resolved_program = resolve_program(program);
+    let mut command = Command::new(resolved_program);
+    command.args(args);
+    apply_command_environment(&mut command);
+    command.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn command_available(program: &str) -> bool {
+    Path::new(program).exists() || resolve_program(program) != program
+}
+
+fn open_folder_with_candidates(path: &str) -> Result<(), String> {
+    let mut errors = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        match spawn_detached("open", &[path]) {
+            Ok(()) => return Ok(()),
+            Err(error) => errors.push(format!("open: {}", error)),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        match spawn_detached("explorer.exe", &[path]) {
+            Ok(()) => return Ok(()),
+            Err(error) => errors.push(format!("explorer.exe: {}", error)),
+        }
+        match spawn_detached("explorer", &[path]) {
+            Ok(()) => return Ok(()),
+            Err(error) => errors.push(format!("explorer: {}", error)),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        for program in [
+            "xdg-open",
+            "gio",
+            "kde-open5",
+            "kde-open",
+            "exo-open",
+            "nautilus",
+            "dolphin",
+            "thunar",
+        ] {
+            if !command_available(program) {
+                continue;
+            }
+
+            let result = if program == "gio" {
+                spawn_detached(program, &["open", path])
+            } else {
+                spawn_detached(program, &[path])
+            };
+
+            match result {
+                Ok(()) => return Ok(()),
+                Err(error) => errors.push(format!("{}: {}", program, error)),
+            }
+        }
+    }
+
+    Err(if errors.is_empty() {
+        "No supported folder opener found".to_string()
+    } else {
+        errors.join("; ")
+    })
+}
+
+fn open_vscode_with_candidates(path: &str) -> Result<(), String> {
+    let mut errors = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        for program in [
+            "code",
+            "code-insiders",
+            "codium",
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            "/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders",
+            "/Applications/VSCodium.app/Contents/Resources/app/bin/codium",
+        ] {
+            if command_available(program) {
+                match spawn_detached(program, &[path]) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => errors.push(format!("{}: {}", program, error)),
+                }
+            }
+        }
+
+        for app_name in [
+            "Visual Studio Code",
+            "Visual Studio Code - Insiders",
+            "VSCodium",
+        ] {
+            match spawn_detached("open", &["-a", app_name, path]) {
+                Ok(()) => return Ok(()),
+                Err(error) => errors.push(format!("open -a {}: {}", app_name, error)),
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        for program in ["code", "code-insiders", "codium", "code-oss", "vscodium"] {
+            if command_available(program) {
+                match spawn_detached(program, &[path]) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => errors.push(format!("{}: {}", program, error)),
+                }
+            }
+        }
+
+        for app_id in ["com.visualstudio.code", "com.vscodium.codium"] {
+            if command_available("flatpak") {
+                match spawn_detached("flatpak", &["run", app_id, path]) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => errors.push(format!("flatpak {}: {}", app_id, error)),
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        for program in [
+            "code.cmd",
+            "code-insiders.cmd",
+            "codium.cmd",
+            "code",
+            "code-insiders",
+            "codium",
+        ] {
+            match spawn_detached(program, &[path]) {
+                Ok(()) => return Ok(()),
+                Err(error) => errors.push(format!("{}: {}", program, error)),
+            }
+        }
+    }
+
+    Err(if errors.is_empty() {
+        "VS Code command was not found".to_string()
+    } else {
+        errors.join("; ")
+    })
 }
 
 #[tauri::command]
 fn open_in_terminal(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
-            .args(["-a", "Terminal", &path])
-            .spawn()
+        spawn_detached("open", &["-a", "Terminal", &path])
             .map_err(|e| format!("Failed to open Terminal: {}", e))?;
     }
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd")
-            .args(["/C", "start", "", "cmd.exe", "/K", "cd", "/d", &path])
-            .spawn()
-            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+        spawn_detached(
+            "cmd",
+            &["/C", "start", "", "cmd.exe", "/K", "cd", "/d", &path],
+        )
+        .map_err(|e| format!("Failed to open Terminal: {}", e))?;
     }
     #[cfg(target_os = "linux")]
     {
-        fn command_exists(name: &str) -> bool {
-            Command::new("which")
-                .arg(name)
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-        }
-
-        if command_exists("gnome-terminal") {
-            Command::new("gnome-terminal")
-                .arg(format!("--working-directory={}", path))
-                .spawn()
+        if command_available("gnome-terminal") {
+            spawn_detached(
+                "gnome-terminal",
+                &[&format!("--working-directory={}", path)],
+            )
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+        } else if command_available("konsole") {
+            spawn_detached("konsole", &["--workdir", &path])
                 .map_err(|e| format!("Failed to open Terminal: {}", e))?;
-        } else if command_exists("konsole") {
-            Command::new("konsole")
-                .args(["--workdir", &path])
-                .spawn()
+        } else if command_available("xfce4-terminal") {
+            spawn_detached("xfce4-terminal", &["--working-directory", &path])
                 .map_err(|e| format!("Failed to open Terminal: {}", e))?;
-        } else if command_exists("xfce4-terminal") {
-            Command::new("xfce4-terminal")
-                .args(["--working-directory", &path])
-                .spawn()
-                .map_err(|e| format!("Failed to open Terminal: {}", e))?;
-        } else if command_exists("xterm") {
-            Command::new("xterm")
-                .args([
+        } else if command_available("xterm") {
+            spawn_detached(
+                "xterm",
+                &[
                     "-e",
                     "sh",
                     "-lc",
                     "cd \"$1\" && exec \"${SHELL:-sh}\"",
                     "prolaunch-terminal",
                     &path,
-                ])
-                .spawn()
-                .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+                ],
+            )
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
         } else {
             return Err("No supported terminal found".to_string());
         }
@@ -1234,6 +1378,7 @@ pub fn run() {
             save_recent_project,
             remove_recent_project,
             clear_recent_projects,
+            open_project_folder,
             open_in_vscode,
             open_in_terminal,
         ])
