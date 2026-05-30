@@ -2,9 +2,9 @@
 # <img width="32" height="32" alt="32x32" src="https://github.com/user-attachments/assets/9b85dfc7-b82f-4d99-9292-737396419d58" /> ProLaunch
 
 A cross-platform desktop app that turns project commands into a visual
-interface. Open any project folder — ProLaunch detects available commands and
+interface. Open any project folder - ProLaunch detects available commands and
 shows them as buttons. Click to run, watch live logs, kill or restart
-processes, see which ports are in use — no terminal needed.
+processes, see which ports are in use - no terminal needed.
 
 Works on **macOS, Windows and Linux**. Built with Tauri + React + TypeScript.
 
@@ -24,7 +24,7 @@ Works on **macOS, Windows and Linux**. Built with Tauri + React + TypeScript.
 ## Install
 
 ProLaunch is **built from source on your own machine**. No code signing is
-involved — a locally compiled binary is not flagged by macOS Gatekeeper or
+involved - a locally compiled binary is not flagged by macOS Gatekeeper or
 Windows SmartScreen.
 
 ### macOS / Linux
@@ -39,7 +39,7 @@ The script:
 2. Installs Rust automatically (via `rustup`) if it is missing.
 3. Installs the platform build dependencies.
 4. Builds the app from source.
-5. Installs it and adds it to your menu — macOS: `/Applications` (Launchpad
+5. Installs it and adds it to your menu - macOS: `/Applications` (Launchpad
    / Spotlight); Linux: application menu (via the `.deb`, or a desktop entry
    for non-apt systems).
 6. Deletes the clone and all build artifacts.
@@ -64,7 +64,7 @@ Bash is not the native shell on Windows. Build manually:
    ```
 
 3. The installer is created at
-   `src-tauri/target/release/bundle/` — run the `.exe` / `.msi` from there.
+   `src-tauri/target/release/bundle/` - run the `.exe` / `.msi` from there.
 4. Delete the cloned folder afterwards if you only need the installed app.
 
 ## Updating
